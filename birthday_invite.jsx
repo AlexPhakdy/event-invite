@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { MapPin, Calendar, Check, Loader2, Ticket as TicketIcon, X, ChevronRight } from "lucide-react";
+import { fetchGuests, addGuest, clearGuests } from "./api.js";
 
-const GUESTS_KEY = "guests";
 const FALL_MS = 900;
 const CLAIM_MS = 320;
 const LAND_SCALE = 1.5;
@@ -129,10 +129,9 @@ export default function BirthdayInvite() {
     if (stage !== "landed" && stage !== "claiming" && stage !== "claimed") return;
     (async () => {
       try {
-        const res = await window.storage.get(GUESTS_KEY, true);
-        if (res && res.value) setGuests(JSON.parse(res.value));
+        setGuests(await fetchGuests());
       } catch (e) {
-        // no key yet — empty guest list is fine
+        // no guests yet — empty list is fine
       } finally {
         setLoadingGuests(false);
       }
@@ -152,7 +151,7 @@ export default function BirthdayInvite() {
       if (window.confirm("Clear the entire guest list? This can't be undone.")) {
         (async () => {
           try {
-            await window.storage.set(GUESTS_KEY, JSON.stringify([]), true);
+            await clearGuests();
             setGuests([]);
           } catch (e) {
             // ignore — nothing to clear if storage isn't reachable
@@ -175,20 +174,13 @@ export default function BirthdayInvite() {
     setError("");
     setSubmitting(true);
     try {
-      const entry = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      const saved = await addGuest({
         name: name.trim(),
         status,
         attending: status === "declined" ? [] : attending,
         note: note.trim(),
-        ts: Date.now(),
-      };
-      const latest = await window.storage.get(GUESTS_KEY, true).catch(() => null);
-      const current = latest && latest.value ? JSON.parse(latest.value) : [];
-      const updated = [...current, entry];
-      const result = await window.storage.set(GUESTS_KEY, JSON.stringify(updated), true);
-      if (!result) throw new Error("Storage failed");
-      setGuests(updated);
+      });
+      setGuests((prev) => [...prev, saved]);
       setSubmitted(true);
       setName("");
       setNote("");
