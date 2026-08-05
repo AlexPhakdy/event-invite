@@ -610,9 +610,12 @@ export default function BirthdayInvite() {
           animation: stream-flow ${POUR_MS}ms ease-in-out forwards;
         }
         @keyframes stream-flow {
+          /* the glass is empty at first, so the stream reaches all the way down
+             to the bottom (62px); as the fill rises to meet it, the visible
+             stream shortens up to 26px — where the final liquid surface sits */
           0%, 9%    { height: 0; opacity: 0; }
-          11%       { height: 32px; opacity: 1; }
-          78%       { height: 32px; opacity: 1; }
+          11%       { height: 62px; opacity: 1; }
+          80%       { height: 26px; opacity: 1; }
           84%, 100% { height: 0; opacity: 0; }
         }
 
@@ -626,6 +629,7 @@ export default function BirthdayInvite() {
         .boot-glass-fill {
           position: absolute; bottom: 0; left: 0; width: 100%; height: 0%;
           background: linear-gradient(180deg, #FFD98A, #D98C2B);
+          border-radius: 0 0 9px 9px;
           animation: glass-fill ${POUR_MS}ms ease-in-out forwards;
         }
         @keyframes glass-fill {
