@@ -228,7 +228,12 @@ export default function BirthdayInvite() {
         .serif { font-family: 'Fraunces', serif; }
 
         .party-bg {
-          position: fixed; inset: 0; z-index: 0; pointer-events: none;
+          position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 0; pointer-events: none;
+          /* fall back to vh, then prefer the large-viewport unit — this is what makes the
+             background actually extend behind Safari's collapsible toolbars instead of
+             stopping at whatever the toolbar's current (expanded) size happens to be */
+          height: 100vh;
+          height: 100lvh;
           background: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
           background-size: 400% 400%;
           animation: gradient-flow 22s ease infinite;
