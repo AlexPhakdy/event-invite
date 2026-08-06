@@ -6,29 +6,27 @@
     <title>Alex & Kylie's Birthday</title>
 
     <style>
-      /* html keeps a plain solid color as the base — deliberately NO background-image here.
-         A gradient on the root propagates to the canvas, which makes iOS Safari paint its
-         toolbars as a flat slab instead of blurring page content through them.
-         body/#root must stay transparent so #bg-gradient (z-index:-1) shows through. */
-      html { background: #100C15; margin: 0; min-height: 100%; }
-      body, #root { background: transparent; margin: 0; min-height: 100%; }
-
-      /* The animated gradient is a direct child of <body>, NOT part of the React tree.
-         It used to live inside .inv-root, which has `overflow: hidden` — and Safari clips
-         even position:fixed descendants of an overflow:hidden ancestor. That clipping is
-         what cut the gradient off at the top and bottom no matter how far it was oversized.
-         Out here nothing can clip it, and it also paints on the very first frame. */
-      #bg-gradient {
-        position: fixed;
-        top: -140px; bottom: -280px; left: 0; right: 0;
-        z-index: -1;               /* behind page content, above html's base color */
-        pointer-events: none;
-        background: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
-        /* viewport units, not percentages — percentages resolve against this (oversized)
-           element and would blow the pattern up into hard-edged patches */
-        background-size: 400vw 400vh;
+      /* The gradient MUST live on <html>. A root-element background is propagated to the
+         canvas, which the browser paints across the entire surface — behind Safari's
+         toolbars, into the overscroll/rubber-band area, and beyond the layout viewport when
+         you pinch-zoom out. A position:fixed div can never do this: it is sized to the
+         layout viewport by definition, so it always stops short at the edges (visible as a
+         hard cutoff into flat black when zoomed out). That was the real cause of the
+         "color doesn't go far enough" band, not any height/overshoot miscalculation.
+         height:100% (not min-height) keeps this box viewport-sized so background-size:400%
+         stays a sane scale rather than stretching down the whole scrolling document.
+         No background-attachment:fixed — it's flaky on iOS and alters edge compositing. */
+      html {
+        margin: 0;
+        height: 100%;
+        background-color: #100C15;
+        background-image: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
+        background-size: 400% 400%;
+        background-repeat: no-repeat;
         animation: page-gradient 22s ease infinite;
       }
+      /* must stay transparent, or they'd cover the canvas gradient */
+      body, #root { background: transparent; margin: 0; min-height: 100%; }
       @keyframes page-gradient {
         0%   { background-position: 0% 50%; }
         50%  { background-position: 100% 50%; }
@@ -117,7 +115,6 @@
     />
   </head>
   <body>
-    <div id="bg-gradient"></div>
     <div id="preloader">
       <div class="pre-scene">
         <div class="pre-bottle">
