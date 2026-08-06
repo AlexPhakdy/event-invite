@@ -5,7 +5,10 @@ import { fetchGuests, addGuest, clearGuests } from "./api.js";
 const FALL_MS = 900;
 const CLAIM_MS = 320;
 const LAND_SCALE = 1.5;
-const POUR_MS = 5000;
+// 8s total, with the pour deliberately not starting until ~3s in — on a cold load the
+// page can sit blank for a couple of seconds, and this keeps the pour from happening
+// before the user is actually looking at it
+const POUR_MS = 8000;
 const BOOT_FADE_MS = 500;
 
 const EVENTS = [
@@ -585,11 +588,13 @@ export default function BirthdayInvite() {
           animation: bottle-tip ${POUR_MS}ms ease-in-out forwards;
         }
         @keyframes bottle-tip {
-          0%   { transform: rotate(0deg); }
-          10%  { transform: rotate(-50deg); }
-          80%  { transform: rotate(-50deg); }
-          92%  { transform: rotate(0deg); }
-          100% { transform: rotate(0deg); }
+          /* percentages are of the full 8s: sits still until 37% (~3s), tips, pours,
+             then rights itself around 94% (~7.5s) */
+          0%, 37% { transform: rotate(0deg); }
+          44%     { transform: rotate(-50deg); }
+          88%     { transform: rotate(-50deg); }
+          94%     { transform: rotate(0deg); }
+          100%    { transform: rotate(0deg); }
         }
         .boot-bottle-body {
           position: absolute; bottom: 0; left: 0; width: 100%; height: 68%;
@@ -611,11 +616,12 @@ export default function BirthdayInvite() {
         @keyframes stream-flow {
           /* the glass is empty at first, so the stream reaches all the way down
              to the bottom (62px); as the fill rises to meet it, the visible
-             stream shortens up to 26px — where the final liquid surface sits */
-          0%, 9%    { height: 0; opacity: 0; }
-          11%       { height: 62px; opacity: 1; }
-          80%       { height: 26px; opacity: 1; }
-          84%, 100% { height: 0; opacity: 0; }
+             stream shortens up to 26px — where the final liquid surface sits.
+             Starts only after the bottle has finished tipping (~44%). */
+          0%, 44%   { height: 0; opacity: 0; }
+          47%       { height: 62px; opacity: 1; }
+          86%       { height: 26px; opacity: 1; }
+          89%, 100% { height: 0; opacity: 0; }
         }
 
         .boot-glass {
@@ -632,8 +638,9 @@ export default function BirthdayInvite() {
           animation: glass-fill ${POUR_MS}ms ease-in-out forwards;
         }
         @keyframes glass-fill {
-          0%, 10% { height: 0%; }
-          80%     { height: 78%; }
+          /* stays empty through the 3s hold, then fills while the stream is flowing */
+          0%, 46% { height: 0%; }
+          87%     { height: 78%; }
           100%    { height: 78%; }
         }
 
