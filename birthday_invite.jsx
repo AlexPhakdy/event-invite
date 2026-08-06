@@ -232,12 +232,11 @@ export default function BirthdayInvite() {
         .serif { font-family: 'Fraunces', serif; }
 
         .party-bg {
-          position: fixed; top: 0; left: 0; right: 0; z-index: 0; pointer-events: none;
-          /* lvh can report the wrong (too-small) value on initial paint in Safari and only
-             "settle" after a scroll/resize forces recalculation — a generous fixed overshoot
-             is more reliable than depending on lvh's initial value being correct */
-          height: calc(100vh + 220px);
-          height: calc(100dvh + 220px);
+          position: fixed; z-index: 0; pointer-events: none;
+          /* anchored on all four edges with a generous negative overshoot, instead of a
+             computed height — this can't fall short regardless of which viewport size
+             (small/large/dynamic) Safari resolves fixed positioning against */
+          top: -120px; bottom: -260px; left: -60px; right: -60px;
           background: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
           background-size: 400% 400%;
           animation: gradient-flow 22s ease infinite;
