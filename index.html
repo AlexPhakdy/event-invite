@@ -5,9 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Alex & Kylie's Birthday</title>
 
-    <!-- dark background from the very first paint, before the JS bundle even loads -->
+    <!-- The animated gradient lives on <html> on purpose. A background set on the root
+         element is propagated by the browser to the *canvas*, which is painted across the
+         entire viewport — behind Safari's collapsible toolbars, into the overscroll/rubber-band
+         area, everywhere — no matter how tall any element's box actually is. A fixed-position
+         div can never guarantee that, which is why the gradient used to stop short and reveal
+         a flat dark band. background-attachment: fixed keeps it sized to the viewport so it
+         doesn't stretch or repeat down a long scrolling page.
+         Bonus: it paints on the very first frame, before the JS bundle has even loaded. -->
     <style>
-      html, body, #root { background: #100C15; margin: 0; min-height: 100%; }
+      html {
+        margin: 0;
+        min-height: 100%;
+        background-color: #100C15;
+        background-image: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
+        background-size: 400% 400%;
+        background-attachment: fixed;
+        background-repeat: no-repeat;
+        animation: page-gradient 22s ease infinite;
+      }
+      @keyframes page-gradient {
+        0%   { background-position: 0% 50%; }
+        50%  { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+      /* must stay transparent — an opaque layer here would cover the canvas gradient */
+      body, #root { background: transparent; margin: 0; min-height: 100%; }
 
       /* pure CSS/HTML re-creation of the React boot animation, so something is already
          pouring the moment the page paints — before the JS bundle has even loaded, let
