@@ -1,6 +1,19 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { MapPin, Calendar, Check, Loader2, Ticket as TicketIcon, X, ChevronRight } from "lucide-react";
-import { fetchGuests, addGuest, clearGuests, deleteGuest, updateGuest, WrongCodeError } from "./api.js";
+import {
+  fetchGuests,
+  addGuest,
+  clearGuests,
+  deleteGuest,
+  updateGuest,
+  fetchItinerary,
+  addItineraryItem,
+  updateItineraryItem,
+  deleteItineraryItem,
+  WrongCodeError,
+} from "./api.js";
+
+const TIMELINE_COLORS = ["#4ADE80", "#FBBF24", "#60A5FA", "#F472B6", "#93A980", "#F87171"];
 
 const FALL_MS = 900;
 const CLAIM_MS = 320;
@@ -53,10 +66,27 @@ export default function BirthdayInvite() {
   const [error, setError] = useState("");
   const [selectedGuest, setSelectedGuest] = useState(null);
   const [showItinerary, setShowItinerary] = useState(false);
+  const [itinerary, setItinerary] = useState([]);
+  const [loadingItinerary, setLoadingItinerary] = useState(true);
+  const [showAddEvent, setShowAddEvent] = useState(false);
+  const [adminEvent, setAdminEvent] = useState(null);
   const [adminGuest, setAdminGuest] = useState(null);
   const [adminCode, setAdminCode] = useState("");
   const secretTaps = useRef({ count: 0, timer: null });
   const guestListRef = useRef(null);
+
+  useEffect(() => {
+    if (!showItinerary) return;
+    (async () => {
+      try {
+        setItinerary(await fetchItinerary());
+      } catch (e) {
+        // no events yet — empty timeline is fine
+      } finally {
+        setLoadingItinerary(false);
+      }
+    })();
+  }, [showItinerary]);
 
   useEffect(() => {
     if (submitted) {
@@ -208,6 +238,41 @@ export default function BirthdayInvite() {
     setAdminGuest(null);
   }
 
+  function handleAddEventClick() {
+    const code = window.prompt("Enter the code to add an event:");
+    if (!code) return;
+    setAdminCode(code);
+    setAdminEvent(null);
+    setShowAddEvent(true);
+  }
+
+  // long-press a timeline item -> code prompt -> edit form. Same pattern as the guest
+  // admin flow: the code is only ever handed to the API, never checked here.
+  function handleLongPressEvent(item) {
+    const code = window.prompt(`Edit "${item.title}" — enter the code:`);
+    if (!code) return;
+    setAdminCode(code);
+    setAdminEvent(item);
+  }
+
+  async function handleEventSave(patch) {
+    if (adminEvent) {
+      const saved = await updateItineraryItem(adminEvent.id, patch, adminCode);
+      setItinerary((prev) => prev.map((i) => (i.id === adminEvent.id ? { ...i, ...(saved || patch) } : i)));
+      setAdminEvent(null);
+    } else {
+      const saved = await addItineraryItem(patch, adminCode);
+      setItinerary((prev) => [...prev, saved]);
+      setShowAddEvent(false);
+    }
+  }
+
+  async function handleEventDelete() {
+    await deleteItineraryItem(adminEvent.id, adminCode);
+    setItinerary((prev) => prev.filter((i) => i.id !== adminEvent.id));
+    setAdminEvent(null);
+  }
+
   function toggleAttending(key) {
     setAttending((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   }
@@ -343,6 +408,33 @@ export default function BirthdayInvite() {
         }
         .danger-btn:hover { background: rgba(255,90,90,0.2); border-color: rgba(255,120,120,0.7); }
 
+        .itinerary-modal { max-height: 82vh; overflow-y: auto; }
+        .itinerary-timeline {
+          position: relative; display: grid; gap: 22px; padding-left: 26px;
+        }
+        .itinerary-timeline::before {
+          content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 2px;
+          background: rgba(255,255,255,0.14);
+        }
+        .itinerary-item {
+          position: relative; cursor: pointer; border-radius: 10px; padding: 4px 8px;
+          margin: -4px -8px; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+          transition: background .2s ease, transform .15s ease;
+        }
+        .itinerary-item-pressing {
+          background: rgba(255,255,255,0.08);
+          transform: scale(0.98);
+          transition: background .2s ease, transform ${LONG_PRESS_MS}ms ease;
+        }
+        .itinerary-dot {
+          position: absolute; left: -25px; top: 4px; width: 11px; height: 11px; border-radius: 50%;
+        }
+        .itinerary-time {
+          font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
+          opacity: 0.55; margin-bottom: 2px;
+        }
+        .itinerary-title { font-size: 15.5px; font-weight: 700; }
+        .itinerary-desc { font-size: 13px; opacity: 0.7; margin-top: 4px; line-height: 1.5; }
 
         .field {
           width: 100%; background: rgba(0,0,0,0.24); border: 1px solid rgba(255,255,255,0.16);
@@ -1059,13 +1151,32 @@ export default function BirthdayInvite() {
         )}
 
         {selectedGuest && <GuestModal guest={selectedGuest} onClose={() => setSelectedGuest(null)} />}
-        {showItinerary && <ItineraryModal onClose={() => setShowItinerary(false)} />}
+        {showItinerary && (
+          <ItineraryModal
+            items={itinerary}
+            loading={loadingItinerary}
+            onAddEvent={handleAddEventClick}
+            onLongPressEvent={handleLongPressEvent}
+            onClose={() => setShowItinerary(false)}
+          />
+        )}
         {adminGuest && (
           <AdminGuestModal
             guest={adminGuest}
             onSave={handleAdminSave}
             onDelete={handleAdminDelete}
             onClose={() => setAdminGuest(null)}
+          />
+        )}
+        {(showAddEvent || adminEvent) && (
+          <EventFormModal
+            item={adminEvent}
+            onSave={handleEventSave}
+            onDelete={adminEvent ? handleEventDelete : undefined}
+            onClose={() => {
+              setShowAddEvent(false);
+              setAdminEvent(null);
+            }}
           />
         )}
       </div>
@@ -1386,20 +1497,175 @@ function AdminGuestModal({ guest, onSave, onDelete, onClose }) {
   );
 }
 
-function ItineraryModal({ onClose }) {
+function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose }) {
   return (
     <div className="guest-modal-backdrop" onClick={onClose}>
-      <div className="glass-panel guest-modal" onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
+      <div className="glass-panel guest-modal itinerary-modal" onClick={(e) => e.stopPropagation()}>
         <button className="guest-modal-close" onClick={onClose} aria-label="Close">
           <X size={16} />
         </button>
-        <div style={{ fontSize: 34, marginBottom: 10 }}>🗓️</div>
-        <div className="serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 8 }}>
-          Itinerary
+
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
+          <div style={{ fontSize: 30, marginBottom: 6 }}>🗓️</div>
+          <div className="serif" style={{ fontSize: 20, fontWeight: 600 }}>
+            Itinerary
+          </div>
         </div>
-        <div style={{ fontSize: 14.5, color: "var(--muted)", lineHeight: 1.6 }}>
-          Check back soon!
+
+        {loading ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, opacity: 0.8, justifyContent: "center" }}>
+            <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> loading...
+          </div>
+        ) : items.length === 0 ? (
+          <div style={{ fontSize: 14.5, color: "var(--muted)", lineHeight: 1.6, textAlign: "center" }}>
+            Check back soon!
+          </div>
+        ) : (
+          <div className="itinerary-timeline">
+            {items.map((item, i) => (
+              <ItineraryRow
+                key={item.id}
+                item={item}
+                color={TIMELINE_COLORS[i % TIMELINE_COLORS.length]}
+                onLongPress={onLongPressEvent}
+              />
+            ))}
+          </div>
+        )}
+
+        <button className="pill-btn ghost-btn" style={{ marginTop: 22, width: "100%", justifyContent: "center" }} onClick={onAddEvent}>
+          <Calendar size={16} /> Add Event
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ItineraryRow({ item, color, onLongPress }) {
+  const timer = useRef(null);
+  const firedRef = useRef(false);
+  const [pressing, setPressing] = useState(false);
+
+  function start() {
+    firedRef.current = false;
+    setPressing(true);
+    timer.current = setTimeout(() => {
+      firedRef.current = true;
+      setPressing(false);
+      onLongPress(item);
+    }, LONG_PRESS_MS);
+  }
+  function cancel() {
+    clearTimeout(timer.current);
+    setPressing(false);
+  }
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  return (
+    <div
+      className={`itinerary-item ${pressing ? "itinerary-item-pressing" : ""}`}
+      onPointerDown={start}
+      onPointerUp={cancel}
+      onPointerLeave={cancel}
+      onPointerCancel={cancel}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <span className="itinerary-dot" style={{ background: color, boxShadow: `0 0 0 3px ${color}33` }} />
+      {item.time && <div className="itinerary-time">{item.time}</div>}
+      <div className="itinerary-title">{item.title}</div>
+      {item.description && <div className="itinerary-desc">{item.description}</div>}
+    </div>
+  );
+}
+
+// Shared create/edit form — create mode when `item` is omitted.
+function EventFormModal({ item, onSave, onDelete, onClose }) {
+  const [title, setTitle] = useState(item?.title || "");
+  const [time, setTime] = useState(item?.time || "");
+  const [description, setDescription] = useState(item?.description || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function save(e) {
+    e.preventDefault();
+    if (!title.trim()) {
+      setErr("Event name is required");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      await onSave({ title: title.trim(), time: time.trim(), description: description.trim() });
+    } catch (e) {
+      setErr(e instanceof WrongCodeError ? "Wrong code." : "Couldn't save the event.");
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!window.confirm(`Remove "${item.title}" from the itinerary?`)) return;
+    setBusy(true);
+    setErr("");
+    try {
+      await onDelete();
+    } catch (e) {
+      setErr(e instanceof WrongCodeError ? "Wrong code." : "Couldn't remove that event.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="guest-modal-backdrop" onClick={onClose}>
+      <div className="glass-panel guest-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="guest-modal-close" onClick={onClose} aria-label="Close">
+          <X size={16} />
+        </button>
+
+        <div style={{ fontSize: 10.5, letterSpacing: 1.4, fontWeight: 800, opacity: 0.5, textTransform: "uppercase" }}>
+          Host view
         </div>
+        <div className="serif" style={{ fontSize: 21, fontWeight: 600, margin: "4px 0 18px", paddingRight: 24 }}>
+          {item ? "Edit Event" : "Add Event"}
+        </div>
+
+        <form onSubmit={save} style={{ display: "grid", gap: 14 }}>
+          <input
+            className="field"
+            placeholder="Event name"
+            value={title}
+            maxLength={60}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <input
+            className="field"
+            placeholder="Time (e.g. 7:00 PM)"
+            value={time}
+            maxLength={40}
+            onChange={(e) => setTime(e.target.value)}
+          />
+          <textarea
+            className="field"
+            placeholder="Description (optional)"
+            rows={3}
+            value={description}
+            maxLength={300}
+            onChange={(e) => setDescription(e.target.value)}
+            style={{ resize: "none" }}
+          />
+
+          {err && <div style={{ color: "#FF7A9A", fontSize: 13, fontWeight: 700 }}>{err}</div>}
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button type="submit" className="pill-btn pill-primary" disabled={busy} style={{ flex: 1, padding: "12px", borderRadius: 12, fontSize: 14 }}>
+              {busy ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : item ? "Save changes" : "Add event"}
+            </button>
+            {item && (
+              <button type="button" className="pill-btn danger-btn" disabled={busy} onClick={remove}>
+                Remove
+              </button>
+            )}
+          </div>
+        </form>
       </div>
     </div>
   );
