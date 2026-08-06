@@ -237,8 +237,12 @@ export default function BirthdayInvite() {
              computed height — this can't fall short regardless of which viewport size
              (small/large/dynamic) Safari resolves fixed positioning against */
           top: -120px; bottom: -260px; left: -60px; right: -60px;
+          /* fixed pixel size, not a percentage — the element itself is intentionally
+             oversized (above) for safe-area coverage, and a percentage-based background-size
+             would scale the gradient pattern up right along with it, turning smooth color
+             blends into hard-edged flat patches within the actual visible screen */
           background: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
-          background-size: 400% 400%;
+          background-size: 1500px 1500px;
           animation: gradient-flow 22s ease infinite;
         }
         @keyframes gradient-flow {
