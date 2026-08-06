@@ -5,20 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Alex & Kylie's Birthday</title>
 
-    <!-- The animated gradient lives on <html> on purpose. A background set on the root
-         element is propagated by the browser to the *canvas*, which is painted across the
-         entire viewport — behind Safari's collapsible toolbars, into the overscroll/rubber-band
-         area, everywhere — no matter how tall any element's box actually is. A fixed-position
-         div can never guarantee that, which is why the gradient used to stop short and reveal
-         a flat dark band. background-attachment: fixed keeps it sized to the viewport so it
-         doesn't stretch or repeat down a long scrolling page.
-         Bonus: it paints on the very first frame, before the JS bundle has even loaded. -->
     <style>
-      /* Plain solid color only — deliberately NO background-image here. A gradient on the
-         root propagates to the canvas and makes iOS Safari render its toolbars as a flat
-         slab instead of blurring the page content through them. The animated gradient lives
-         on .party-bg (a fixed layer inside the app) so the toolbars stay translucent. */
-      html, body, #root { background: #100C15; margin: 0; min-height: 100%; }
+      /* html keeps a plain solid color as the base — deliberately NO background-image here.
+         A gradient on the root propagates to the canvas, which makes iOS Safari paint its
+         toolbars as a flat slab instead of blurring page content through them.
+         body/#root must stay transparent so #bg-gradient (z-index:-1) shows through. */
+      html { background: #100C15; margin: 0; min-height: 100%; }
+      body, #root { background: transparent; margin: 0; min-height: 100%; }
+
+      /* The animated gradient is a direct child of <body>, NOT part of the React tree.
+         It used to live inside .inv-root, which has `overflow: hidden` — and Safari clips
+         even position:fixed descendants of an overflow:hidden ancestor. That clipping is
+         what cut the gradient off at the top and bottom no matter how far it was oversized.
+         Out here nothing can clip it, and it also paints on the very first frame. */
+      #bg-gradient {
+        position: fixed;
+        top: -140px; bottom: -280px; left: 0; right: 0;
+        z-index: -1;               /* behind page content, above html's base color */
+        pointer-events: none;
+        background: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
+        /* viewport units, not percentages — percentages resolve against this (oversized)
+           element and would blow the pattern up into hard-edged patches */
+        background-size: 400vw 400vh;
+        animation: page-gradient 22s ease infinite;
+      }
+      @keyframes page-gradient {
+        0%   { background-position: 0% 50%; }
+        50%  { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
 
       /* pure CSS/HTML re-creation of the React boot animation, so something is already
          pouring the moment the page paints — before the JS bundle has even loaded, let
@@ -102,6 +117,7 @@
     />
   </head>
   <body>
+    <div id="bg-gradient"></div>
     <div id="preloader">
       <div class="pre-scene">
         <div class="pre-bottle">

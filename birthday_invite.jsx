@@ -231,22 +231,13 @@ export default function BirthdayInvite() {
         .inv-root { font-family: 'Plus Jakarta Sans', sans-serif; color: #fff; }
         .serif { font-family: 'Fraunces', serif; }
 
+        /* only the drifting glow blobs live here. The gradient itself is #bg-gradient in
+           index.html — outside the React tree, because .inv-root's overflow:hidden clips
+           even position:fixed descendants in Safari, which is what kept cutting the
+           gradient off at the top and bottom. */
         .party-bg {
-          position: fixed; z-index: 0; pointer-events: none;
-          /* oversized past every edge so the gradient still covers the strip Safari reveals
-             when its toolbars collapse — no flat dark band at the bottom */
-          top: -140px; bottom: -280px; left: 0; right: 0;
-          background: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
-          /* viewport units, NOT percentages: percentages resolve against this element, so
-             oversizing it above would blow the gradient up with it and turn smooth blends
-             into hard-edged patches. vw/vh keeps the pattern scaled to the actual screen. */
-          background-size: 400vw 400vh;
-          animation: gradient-flow 22s ease infinite;
-        }
-        @keyframes gradient-flow {
-          0%   { background-position: 0% 50%; }
-          50%  { background-position: 100% 50%; }
-          100% { background-position: 0% 50%; }
+          position: fixed; inset: 0; z-index: 0; pointer-events: none;
+          background: transparent;
         }
         .party-bg span {
           position: absolute; border-radius: 50%; filter: blur(85px);
