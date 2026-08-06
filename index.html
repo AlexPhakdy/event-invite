@@ -16,11 +16,16 @@
     <style>
       html {
         margin: 0;
-        min-height: 100%;
+        /* height (not min-height) keeps this box viewport-sized, so background-size: 400%
+           stays a sensible scale instead of stretching over the whole scrolling document.
+           Coverage does NOT depend on this box's height: a root background is propagated to
+           the canvas and painted across the entire viewport regardless.
+           Deliberately no `background-attachment: fixed` — it's flaky on iOS Safari and
+           changes how the page edges composite, which is what made the toolbars go opaque. */
+        height: 100%;
         background-color: #100C15;
         background-image: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
         background-size: 400% 400%;
-        background-attachment: fixed;
         background-repeat: no-repeat;
         animation: page-gradient 22s ease infinite;
       }
