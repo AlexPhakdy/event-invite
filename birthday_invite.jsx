@@ -15,6 +15,42 @@ import {
 
 const TIMELINE_COLORS = ["#4ADE80", "#FBBF24", "#60A5FA", "#F472B6", "#93A980", "#F87171"];
 
+// Itinerary times are stored as 24h "HH:MM" strings — zero-padded so they sort correctly
+// as plain strings, and unambiguous to parse back into a 12h display or picker state.
+const DEFAULT_TIME_24 = "19:00"; // 7:00 PM — a reasonable default for a party stop
+const MINUTE_STEPS = Array.from({ length: 12 }, (_, i) => i * 5); // :00, :05, ... :55
+
+function time24ToParts(time24) {
+  const m = /^(\d{2}):(\d{2})$/.exec(time24 || "");
+  if (!m) return { hour12: 7, minute: 0, meridiem: "PM" };
+  const h = parseInt(m[1], 10);
+  const minute = parseInt(m[2], 10);
+  const meridiem = h >= 12 ? "PM" : "AM";
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return { hour12, minute, meridiem };
+}
+
+function partsToTime24(hour12, minute, meridiem) {
+  let h = hour12 % 12;
+  if (meridiem === "PM") h += 12;
+  return `${String(h).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function formatTime12(time24) {
+  if (!/^\d{2}:\d{2}$/.test(time24 || "")) return "";
+  const { hour12, minute, meridiem } = time24ToParts(time24);
+  return `${hour12}:${String(minute).padStart(2, "0")} ${meridiem}`;
+}
+
+// events without a valid time sort to the end rather than breaking the sort
+function sortByTime(items) {
+  return [...items].sort((a, b) => {
+    const ta = /^\d{2}:\d{2}$/.test(a.time) ? a.time : "99:99";
+    const tb = /^\d{2}:\d{2}$/.test(b.time) ? b.time : "99:99";
+    return ta.localeCompare(tb);
+  });
+}
+
 // Cached in sessionStorage (not localStorage) on purpose — "this session" should mean
 // this tab, cleared when it's closed, not a permanent login. The code is still validated
 // server-side on every request; this only skips re-prompting client-side.
@@ -461,15 +497,22 @@ export default function BirthdayInvite() {
 
         .itinerary-modal { max-height: 82vh; overflow-y: auto; }
         .itinerary-timeline {
-          position: relative; display: grid; gap: 22px; padding-left: 26px;
+          position: relative; display: grid; gap: 22px; padding-left: 28px;
         }
         .itinerary-timeline::before {
-          content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 2px;
+          /* centered at x=6 (5px + half of the 2px width) — .itinerary-dot below is
+             positioned to land on that same x=6 center, see the note there */
+          content: ""; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 2px;
           background: rgba(255,255,255,0.14);
         }
         .itinerary-item {
-          position: relative; cursor: pointer; border-radius: 10px; padding: 4px 8px;
-          margin: -4px -8px; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+          /* negative margin only on top/right/bottom, deliberately NOT left — the left
+             edge has to stay exactly at the timeline's padding-left (28px) because
+             .itinerary-dot's position is computed relative to it. A symmetric negative
+             margin here previously shifted the row 8px left of where the dot assumed,
+             which is what threw the line/dot alignment off. */
+          position: relative; cursor: pointer; border-radius: 10px; padding: 5px 8px 5px 0;
+          margin: -5px -8px -5px 0; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
           transition: background .2s ease, transform .15s ease;
         }
         .itinerary-item-pressing {
@@ -478,7 +521,10 @@ export default function BirthdayInvite() {
           transition: background .2s ease, transform ${LONG_PRESS_MS}ms ease;
         }
         .itinerary-dot {
-          position: absolute; left: -25px; top: 4px; width: 11px; height: 11px; border-radius: 50%;
+          /* item's left edge sits at global x=28 (timeline's padding-left, since the item
+             itself has no left margin/padding). To land this 12px dot's center on the
+             line's center (global x=6): left = 6 - 6(half dot) - 28(item offset) = -28 */
+          position: absolute; left: -28px; top: 5px; width: 12px; height: 12px; border-radius: 50%;
         }
         .itinerary-time {
           font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
@@ -486,6 +532,32 @@ export default function BirthdayInvite() {
         }
         .itinerary-title { font-size: 15.5px; font-weight: 700; }
         .itinerary-desc { font-size: 13px; opacity: 0.7; margin-top: 4px; line-height: 1.5; }
+
+        .time-picker { display: flex; align-items: center; gap: 6px; }
+        .time-picker-select {
+          background: rgba(0,0,0,0.24); border: 1px solid rgba(255,255,255,0.16);
+          color: #fff; border-radius: 12px; padding: 12px 10px; font-size: 15px; font-weight: 600;
+          font-family: 'Plus Jakarta Sans', sans-serif; outline: none;
+          box-shadow: inset 0 1px 4px rgba(0,0,0,0.35);
+          transition: border-color .2s ease, background .2s ease;
+        }
+        .time-picker-select:hover { border-color: rgba(255,255,255,0.3); }
+        .time-picker-select:focus { border-color: var(--accent-a); }
+        .time-picker-select option { background: #1B1420; color: #fff; }
+        .time-picker-colon { font-weight: 800; opacity: 0.6; }
+        .meridiem-toggle {
+          display: flex; margin-left: auto; padding: 3px; border-radius: 12px;
+          background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.14);
+        }
+        .meridiem-toggle button {
+          border: none; background: transparent; color: rgba(255,255,255,0.65); font-weight: 700;
+          font-size: 12.5px; padding: 9px 14px; border-radius: 9px; cursor: pointer;
+          font-family: 'Plus Jakarta Sans', sans-serif; transition: background .2s ease, color .2s ease;
+        }
+        .meridiem-toggle button.active {
+          background: linear-gradient(135deg, var(--accent-a), var(--accent-b)); color: #fff;
+          text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+        }
 
         .field {
           width: 100%; background: rgba(0,0,0,0.24); border: 1px solid rgba(255,255,255,0.16);
@@ -1573,7 +1645,7 @@ function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose 
           </div>
         ) : (
           <div className="itinerary-timeline">
-            {items.map((item, i) => (
+            {sortByTime(items).map((item, i) => (
               <ItineraryRow
                 key={item.id}
                 item={item}
@@ -1624,7 +1696,7 @@ function ItineraryRow({ item, color, onLongPress }) {
       <span className="itinerary-dot" style={{ background: color, boxShadow: `0 0 0 3px ${color}33` }} />
       {(item.time || item.location) && (
         <div className="itinerary-time">
-          {item.time}
+          {formatTime12(item.time)}
           {item.time && item.location && " · "}
           {item.location && `@ ${item.location}`}
         </div>
@@ -1635,10 +1707,53 @@ function ItineraryRow({ item, color, onLongPress }) {
   );
 }
 
+function TimePicker({ value, onChange }) {
+  const { hour12, minute, meridiem } = time24ToParts(value);
+  const set = (h, m, mer) => onChange(partsToTime24(h, m, mer));
+
+  return (
+    <div className="time-picker">
+      <select
+        className="time-picker-select"
+        value={hour12}
+        onChange={(e) => set(Number(e.target.value), minute, meridiem)}
+        aria-label="Hour"
+      >
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+          <option key={h} value={h}>
+            {h}
+          </option>
+        ))}
+      </select>
+      <span className="time-picker-colon">:</span>
+      <select
+        className="time-picker-select"
+        value={minute}
+        onChange={(e) => set(hour12, Number(e.target.value), meridiem)}
+        aria-label="Minute"
+      >
+        {MINUTE_STEPS.map((m) => (
+          <option key={m} value={m}>
+            {String(m).padStart(2, "0")}
+          </option>
+        ))}
+      </select>
+      <div className="meridiem-toggle">
+        <button type="button" className={meridiem === "AM" ? "active" : ""} onClick={() => set(hour12, minute, "AM")}>
+          AM
+        </button>
+        <button type="button" className={meridiem === "PM" ? "active" : ""} onClick={() => set(hour12, minute, "PM")}>
+          PM
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Shared create/edit form — create mode when `item` is omitted.
 function EventFormModal({ item, onSave, onDelete, onClose }) {
   const [title, setTitle] = useState(item?.title || "");
-  const [time, setTime] = useState(item?.time || "");
+  const [time, setTime] = useState(item?.time || DEFAULT_TIME_24);
   const [location, setLocation] = useState(item?.location || "");
   const [description, setDescription] = useState(item?.description || "");
   const [busy, setBusy] = useState(false);
@@ -1653,7 +1768,7 @@ function EventFormModal({ item, onSave, onDelete, onClose }) {
     setBusy(true);
     setErr("");
     try {
-      await onSave({ title: title.trim(), time: time.trim(), location: location.trim(), description: description.trim() });
+      await onSave({ title: title.trim(), time, location: location.trim(), description: description.trim() });
     } catch (e) {
       setErr(e instanceof WrongCodeError ? "Wrong code." : "Couldn't save the event.");
       setBusy(false);
@@ -1694,24 +1809,19 @@ function EventFormModal({ item, onSave, onDelete, onClose }) {
             maxLength={60}
             onChange={(e) => setTitle(e.target.value)}
           />
-          <div style={{ display: "flex", gap: 10 }}>
-            <input
-              className="field"
-              placeholder="Time (e.g. 7:00 PM)"
-              value={time}
-              maxLength={40}
-              onChange={(e) => setTime(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <input
-              className="field"
-              placeholder="@ Location"
-              value={location}
-              maxLength={80}
-              onChange={(e) => setLocation(e.target.value)}
-              style={{ flex: 1 }}
-            />
+          <div>
+            <label style={{ fontSize: 11.5, opacity: 0.6, display: "block", marginBottom: 6, letterSpacing: 0.4, fontWeight: 700 }}>
+              TIME
+            </label>
+            <TimePicker value={time} onChange={setTime} />
           </div>
+          <input
+            className="field"
+            placeholder="@ Location"
+            value={location}
+            maxLength={80}
+            onChange={(e) => setLocation(e.target.value)}
+          />
           <textarea
             className="field"
             placeholder="Description (optional)"
