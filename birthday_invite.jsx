@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { MapPin, Calendar, Check, Loader2, Ticket as TicketIcon, X, ChevronRight } from "lucide-react";
-import { fetchGuests, addGuest, clearGuests, deleteGuest, WrongCodeError } from "./api.js";
+import { fetchGuests, addGuest, clearGuests, deleteGuest, updateGuest, WrongCodeError } from "./api.js";
 
 const FALL_MS = 900;
 const CLAIM_MS = 320;
@@ -53,6 +53,8 @@ export default function BirthdayInvite() {
   const [error, setError] = useState("");
   const [selectedGuest, setSelectedGuest] = useState(null);
   const [showItinerary, setShowItinerary] = useState(false);
+  const [adminGuest, setAdminGuest] = useState(null);
+  const [adminCode, setAdminCode] = useState("");
   const secretTaps = useRef({ count: 0, timer: null });
   const guestListRef = useRef(null);
 
@@ -184,18 +186,26 @@ export default function BirthdayInvite() {
     }
   }
 
-  // long-press a guest row to remove just that one
-  function handleDeleteGuest(guest) {
-    const code = window.prompt(`Remove ${guest.name} from the list? Enter the code:`);
+  // long-press a guest row -> code prompt -> host view where their RSVP can be edited.
+  // The code isn't verified here; it's sent with the save/remove request and validated
+  // server-side, so there's no way to bypass it by poking at the client.
+  function handleLongPressGuest(guest) {
+    const code = window.prompt(`Manage ${guest.name}'s RSVP — enter the code:`);
     if (!code) return;
-    (async () => {
-      try {
-        await deleteGuest(guest.id, code);
-        setGuests((prev) => prev.filter((g) => g.id !== guest.id));
-      } catch (e) {
-        window.alert(e instanceof WrongCodeError ? "Wrong code." : "Couldn't remove that guest.");
-      }
-    })();
+    setAdminCode(code);
+    setAdminGuest(guest);
+  }
+
+  async function handleAdminSave(patch) {
+    const saved = await updateGuest(adminGuest.id, patch, adminCode);
+    setGuests((prev) => prev.map((g) => (g.id === adminGuest.id ? { ...g, ...(saved || patch) } : g)));
+    setAdminGuest(null);
+  }
+
+  async function handleAdminDelete() {
+    await deleteGuest(adminGuest.id, adminCode);
+    setGuests((prev) => prev.filter((g) => g.id !== adminGuest.id));
+    setAdminGuest(null);
   }
 
   function toggleAttending(key) {
@@ -323,6 +333,15 @@ export default function BirthdayInvite() {
           transition: background .2s ease, border-color .2s ease, transform .3s cubic-bezier(.22,1,.36,1);
         }
         .ghost-btn:hover { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.35); }
+
+        .danger-btn {
+          padding: 12px 18px; font-size: 14px; border-radius: 12px;
+          background: rgba(255,90,90,0.12);
+          border: 1px solid rgba(255,120,120,0.45);
+          color: #FF9B9B;
+          transition: background .2s ease, border-color .2s ease;
+        }
+        .danger-btn:hover { background: rgba(255,90,90,0.2); border-color: rgba(255,120,120,0.7); }
 
 
         .field {
@@ -825,6 +844,12 @@ export default function BirthdayInvite() {
               <TicketCard going={headcount} docked expanded />
             </div>
 
+            {/* above the RSVP form on purpose — it explains what Day Hang / Dinner /
+                Night Outing are, which guests need before ticking the attending boxes */}
+            <button className="pill-btn ghost-btn" onClick={() => setShowItinerary(true)}>
+              <Calendar size={16} /> See Itinerary
+            </button>
+
             <div className="glass-panel" style={{ padding: "30px 26px", width: "100%", marginTop: 24 }}>
               <div className="serif" style={{ fontSize: 21, marginBottom: 4, fontWeight: 600 }}>
                 RSVP below:
@@ -1006,7 +1031,7 @@ export default function BirthdayInvite() {
                       items={going}
                       dotColor="#4ADE80"
                       onSelect={setSelectedGuest}
-                      onDelete={handleDeleteGuest}
+                      onLongPress={handleLongPressGuest}
                     />
                   )}
                   {maybe.length > 0 && (
@@ -1015,7 +1040,7 @@ export default function BirthdayInvite() {
                       items={maybe}
                       dotColor="#FBBF24"
                       onSelect={setSelectedGuest}
-                      onDelete={handleDeleteGuest}
+                      onLongPress={handleLongPressGuest}
                     />
                   )}
                   {declined.length > 0 && (
@@ -1024,25 +1049,25 @@ export default function BirthdayInvite() {
                       items={declined}
                       dotColor="rgba(255,255,255,0.4)"
                       onSelect={setSelectedGuest}
-                      onDelete={handleDeleteGuest}
+                      onLongPress={handleLongPressGuest}
                     />
                   )}
                 </div>
               )}
             </div>
-
-            <button
-              className="pill-btn ghost-btn"
-              style={{ marginTop: 26 }}
-              onClick={() => setShowItinerary(true)}
-            >
-              <Calendar size={16} /> See Itinerary
-            </button>
           </div>
         )}
 
         {selectedGuest && <GuestModal guest={selectedGuest} onClose={() => setSelectedGuest(null)} />}
         {showItinerary && <ItineraryModal onClose={() => setShowItinerary(false)} />}
+        {adminGuest && (
+          <AdminGuestModal
+            guest={adminGuest}
+            onSave={handleAdminSave}
+            onDelete={handleAdminDelete}
+            onClose={() => setAdminGuest(null)}
+          />
+        )}
       </div>
     </div>
   );
@@ -1106,7 +1131,7 @@ function FauxQR() {
   );
 }
 
-function GuestGroup({ title, items, dotColor, onSelect, onDelete }) {
+function GuestGroup({ title, items, dotColor, onSelect, onLongPress }) {
   return (
     <div>
       <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 10, fontWeight: 800, opacity: 0.9 }}>
@@ -1114,7 +1139,7 @@ function GuestGroup({ title, items, dotColor, onSelect, onDelete }) {
       </div>
       <div style={{ display: "grid", gap: 6 }}>
         {items.map((g) => (
-          <GuestRow key={g.id} guest={g} dotColor={dotColor} onSelect={onSelect} onDelete={onDelete} />
+          <GuestRow key={g.id} guest={g} dotColor={dotColor} onSelect={onSelect} onLongPress={onLongPress} />
         ))}
       </div>
     </div>
@@ -1123,7 +1148,7 @@ function GuestGroup({ title, items, dotColor, onSelect, onDelete }) {
 
 const LONG_PRESS_MS = 600;
 
-function GuestRow({ guest, dotColor, onSelect, onDelete }) {
+function GuestRow({ guest, dotColor, onSelect, onLongPress }) {
   const timer = useRef(null);
   // set when a long-press fires so the click that follows the release doesn't also open
   // the detail modal
@@ -1136,7 +1161,7 @@ function GuestRow({ guest, dotColor, onSelect, onDelete }) {
     timer.current = setTimeout(() => {
       firedRef.current = true;
       setPressing(false);
-      onDelete(guest);
+      onLongPress(guest);
     }, LONG_PRESS_MS);
   }
 
@@ -1236,6 +1261,125 @@ function GuestModal({ guest, onClose }) {
           }}
         >
           {guest.note ? `“${guest.note}”` : "No note left."}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Host-only view reached by long-pressing a guest row. Lets the RSVP be corrected after
+// the fact — someone flipping from Maybe to going, or adding dinner on later.
+function AdminGuestModal({ guest, onSave, onDelete, onClose }) {
+  const [status, setStatus] = useState(guest.status);
+  const [attending, setAttending] = useState(guest.attending || []);
+  const [note, setNote] = useState(guest.note || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  function toggle(key) {
+    setAttending((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  async function save() {
+    setBusy(true);
+    setErr("");
+    try {
+      await onSave({ status, attending, note });
+    } catch (e) {
+      setErr(e instanceof WrongCodeError ? "Wrong code." : "Couldn't save changes.");
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!window.confirm(`Remove ${guest.name} from the list? This can't be undone.`)) return;
+    setBusy(true);
+    setErr("");
+    try {
+      await onDelete();
+    } catch (e) {
+      setErr(e instanceof WrongCodeError ? "Wrong code." : "Couldn't remove that guest.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="guest-modal-backdrop" onClick={onClose}>
+      <div className="glass-panel guest-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="guest-modal-close" onClick={onClose} aria-label="Close">
+          <X size={16} />
+        </button>
+
+        <div style={{ fontSize: 10.5, letterSpacing: 1.4, fontWeight: 800, opacity: 0.5, textTransform: "uppercase" }}>
+          Host view
+        </div>
+        <div className="serif" style={{ fontSize: 21, fontWeight: 600, margin: "4px 0 18px", paddingRight: 24 }}>
+          {guest.name}
+        </div>
+
+        <label style={{ fontSize: 11.5, opacity: 0.6, display: "block", marginBottom: 6, letterSpacing: 0.4, fontWeight: 700 }}>
+          STATUS
+        </label>
+        <div className="status-group" style={{ marginBottom: 16 }}>
+          <div
+            className="status-slider"
+            style={{ transform: `translateX(${status === "going" ? 0 : status === "maybe" ? 100 : 200}%)` }}
+          />
+          <button type="button" className={`status-chip ${status === "going" ? "active" : ""}`} onClick={() => setStatus("going")}>
+            Going
+          </button>
+          <button type="button" className={`status-chip ${status === "maybe" ? "active" : ""}`} onClick={() => setStatus("maybe")}>
+            Maybe
+          </button>
+          <button type="button" className={`status-chip ${status === "declined" ? "active" : ""}`} onClick={() => setStatus("declined")}>
+            Can't go
+          </button>
+        </div>
+
+        {status !== "declined" && (
+          <>
+            <label style={{ fontSize: 11.5, opacity: 0.6, display: "block", marginBottom: 6, letterSpacing: 0.4, fontWeight: 700 }}>
+              ATTENDING
+            </label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              {EVENTS.map((ev) => (
+                <button
+                  key={ev.key}
+                  type="button"
+                  className={`event-chip ${attending.includes(ev.key) ? "active" : ""}`}
+                  onClick={() => toggle(ev.key)}
+                >
+                  <span className="event-chip-check">
+                    {attending.includes(ev.key) && <Check size={11} strokeWidth={3} />}
+                  </span>
+                  {ev.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        <label style={{ fontSize: 11.5, opacity: 0.6, display: "block", marginBottom: 6, letterSpacing: 0.4, fontWeight: 700 }}>
+          NOTE
+        </label>
+        <textarea
+          className="field"
+          rows={2}
+          value={note}
+          maxLength={200}
+          onChange={(e) => setNote(e.target.value)}
+          style={{ resize: "none", marginBottom: 16 }}
+        />
+
+        {err && <div style={{ color: "#FF7A9A", fontSize: 13, fontWeight: 700, marginBottom: 12 }}>{err}</div>}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="pill-btn pill-primary" disabled={busy} onClick={save} style={{ flex: 1, padding: "12px", borderRadius: 12, fontSize: 14 }}>
+            {busy ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : "Save changes"}
+          </button>
+          <button className="pill-btn danger-btn" disabled={busy} onClick={remove}>
+            Remove
+          </button>
         </div>
       </div>
     </div>

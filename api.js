@@ -64,3 +64,19 @@ export async function deleteGuest(id, code) {
   }
   await sendDelete(`/api/guests?id=${encodeURIComponent(id)}`, code);
 }
+
+export async function updateGuest(id, patch, code) {
+  if (DEV) {
+    const next = readLocal().map((g) => (g.id === id ? { ...g, ...patch } : g));
+    window.localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
+    return next.find((g) => g.id === id);
+  }
+  const res = await fetch(`/api/guests?id=${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "x-admin-code": code },
+    body: JSON.stringify(patch),
+  });
+  if (res.status === 401) throw new WrongCodeError("Wrong code");
+  if (!res.ok) throw new Error("Update failed");
+  return res.json();
+}
