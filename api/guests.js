@@ -15,8 +15,15 @@ async function redis(command) {
 
 export default async function handler(req, res) {
   if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+    // TEMPORARY diagnostic — reports presence/length only, never the actual secret values.
     res.status(500).json({
       error: "Storage isn't configured — set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in the Vercel project's environment variables.",
+      debug: {
+        urlPresent: Boolean(UPSTASH_URL),
+        urlLength: UPSTASH_URL ? UPSTASH_URL.length : 0,
+        tokenPresent: Boolean(UPSTASH_TOKEN),
+        tokenLength: UPSTASH_TOKEN ? UPSTASH_TOKEN.length : 0,
+      },
     });
     return;
   }
