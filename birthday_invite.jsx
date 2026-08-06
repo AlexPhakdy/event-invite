@@ -231,11 +231,22 @@ export default function BirthdayInvite() {
         .inv-root { font-family: 'Plus Jakarta Sans', sans-serif; color: #fff; }
         .serif { font-family: 'Fraunces', serif; }
 
-        /* just the drifting glow blobs — the gradient itself now lives on <html> in
-           index.html so the browser paints it across the whole canvas (see note there) */
         .party-bg {
-          position: fixed; inset: 0; z-index: 0; pointer-events: none;
-          background: transparent;
+          position: fixed; z-index: 0; pointer-events: none;
+          /* oversized past every edge so the gradient still covers the strip Safari reveals
+             when its toolbars collapse — no flat dark band at the bottom */
+          top: -140px; bottom: -280px; left: 0; right: 0;
+          background: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
+          /* viewport units, NOT percentages: percentages resolve against this element, so
+             oversizing it above would blow the gradient up with it and turn smooth blends
+             into hard-edged patches. vw/vh keeps the pattern scaled to the actual screen. */
+          background-size: 400vw 400vh;
+          animation: gradient-flow 22s ease infinite;
+        }
+        @keyframes gradient-flow {
+          0%   { background-position: 0% 50%; }
+          50%  { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
         }
         .party-bg span {
           position: absolute; border-radius: 50%; filter: blur(85px);
