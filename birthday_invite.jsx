@@ -214,16 +214,14 @@ export default function BirthdayInvite() {
       }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
-
         :root {
           --ink: #1B1420;
           --muted: rgba(255,255,255,0.55);
           --bg-solid: #100C15;
-          --accent-a: #3D8BFF;
-          --accent-b: #A855F7;
-          --glow-a: rgba(61,139,255,0.48);
-          --glow-b: rgba(168,85,247,0.4);
+          --accent-a: #2E4A73;
+          --accent-b: #93A980;
+          --glow-a: rgba(46,74,115,0.34);
+          --glow-b: rgba(147,169,128,0.26);
         }
         .inv-root, .inv-root * { box-sizing: border-box; }
         .inv-root { font-family: 'Plus Jakarta Sans', sans-serif; color: #fff; }
@@ -231,7 +229,14 @@ export default function BirthdayInvite() {
 
         .party-bg {
           position: fixed; inset: 0; z-index: 0; pointer-events: none;
-          background: linear-gradient(165deg, #17121D 0%, #100C15 55%, #0A070E 100%);
+          background: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
+          background-size: 400% 400%;
+          animation: gradient-flow 22s ease infinite;
+        }
+        @keyframes gradient-flow {
+          0%   { background-position: 0% 50%; }
+          50%  { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
         }
         .party-bg span {
           position: absolute; border-radius: 50%; filter: blur(85px);
@@ -266,7 +271,8 @@ export default function BirthdayInvite() {
 
         .pill-primary {
           background: linear-gradient(135deg, var(--accent-a), var(--accent-b));
-          color: #0B0810;
+          color: #fff;
+          text-shadow: 0 1px 2px rgba(0,0,0,0.35);
           box-shadow: 0 10px 26px -6px rgba(0,0,0,0.5);
         }
 
@@ -307,7 +313,7 @@ export default function BirthdayInvite() {
         }
         .status-chip:hover { background: rgba(255,255,255,0.07); color: #fff; }
         .status-chip:active { transform: scale(0.96); }
-        .status-chip.active { color: #0B0810; }
+        .status-chip.active { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
         .status-chip.active:hover { background: transparent; }
 
         .event-chip {
@@ -516,8 +522,8 @@ export default function BirthdayInvite() {
         }
         .ticket-admit {
           font-size: 9px; padding: 3px 8px; border-radius: 999px;
-          background: linear-gradient(135deg, var(--accent-a), var(--accent-b)); color: #0B0810; font-weight: 800;
-          white-space: nowrap;
+          background: linear-gradient(135deg, var(--accent-a), var(--accent-b)); color: #fff; font-weight: 800;
+          white-space: nowrap; text-shadow: 0 1px 1px rgba(0,0,0,0.3);
         }
         .ticket-ages {
           position: relative; z-index: 1;
@@ -775,7 +781,7 @@ export default function BirthdayInvite() {
                       margin: "0 auto 12px",
                     }}
                   >
-                    <Check size={20} color="#0B0810" />
+                    <Check size={20} color="#fff" />
                   </div>
                   <div style={{ fontWeight: 800, fontSize: 17 }}>You're on the list</div>
                   <div className="serif" style={{ fontSize: 16, marginTop: 6, color: "var(--muted)", fontStyle: "italic" }}>
@@ -1121,7 +1127,7 @@ function ItineraryModal({ onClose }) {
           Itinerary
         </div>
         <div style={{ fontSize: 14.5, color: "var(--muted)", lineHeight: 1.6 }}>
-          Check back soon — the full schedule is still being finalized.
+          Check back soon!
         </div>
       </div>
     </div>
