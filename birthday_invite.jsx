@@ -232,12 +232,12 @@ export default function BirthdayInvite() {
         .serif { font-family: 'Fraunces', serif; }
 
         .party-bg {
-          position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 0; pointer-events: none;
-          /* fall back to vh, then prefer the large-viewport unit — this is what makes the
-             background actually extend behind Safari's collapsible toolbars instead of
-             stopping at whatever the toolbar's current (expanded) size happens to be */
-          height: 100vh;
-          height: 100lvh;
+          position: fixed; top: 0; left: 0; right: 0; z-index: 0; pointer-events: none;
+          /* lvh can report the wrong (too-small) value on initial paint in Safari and only
+             "settle" after a scroll/resize forces recalculation — a generous fixed overshoot
+             is more reliable than depending on lvh's initial value being correct */
+          height: calc(100vh + 220px);
+          height: calc(100dvh + 220px);
           background: linear-gradient(-45deg, #100C15, #131A26, #14201A, #0C0916, #100C15);
           background-size: 400% 400%;
           animation: gradient-flow 22s ease infinite;

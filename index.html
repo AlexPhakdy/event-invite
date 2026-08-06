@@ -8,6 +8,78 @@
     <!-- dark background from the very first paint, before the JS bundle even loads -->
     <style>
       html, body, #root { background: #100C15; margin: 0; min-height: 100%; }
+
+      /* pure CSS/HTML re-creation of the React boot animation, so something is already
+         pouring the moment the page paints — before the JS bundle has even loaded, let
+         alone mounted. React removes #preloader the instant it takes over. */
+      #preloader {
+        position: fixed; inset: 0; z-index: 999;
+        background: linear-gradient(165deg, #17131c 0%, #0c090f 100%);
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+      }
+      #preloader .pre-scene { position: relative; width: 190px; height: 160px; }
+      #preloader .pre-bottle {
+        position: absolute; left: 133px; top: 50px; width: 28px; height: 68px;
+        transform-origin: 50% 100%;
+        animation: pre-bottle-tip 2600ms ease-in-out infinite;
+      }
+      @keyframes pre-bottle-tip {
+        0%   { transform: rotate(0deg); }
+        10%  { transform: rotate(-50deg); }
+        80%  { transform: rotate(-50deg); }
+        92%  { transform: rotate(0deg); }
+        100% { transform: rotate(0deg); }
+      }
+      #preloader .pre-bottle-body {
+        position: absolute; bottom: 0; left: 0; width: 100%; height: 68%;
+        background: linear-gradient(160deg, rgba(140,105,50,0.95), rgba(60,42,16,0.98));
+        border-radius: 6px 6px 4px 4px; border: 1px solid rgba(255,255,255,0.16);
+      }
+      #preloader .pre-bottle-neck {
+        position: absolute; top: 0; left: 32%; width: 36%; height: 34%;
+        background: linear-gradient(160deg, rgba(140,105,50,0.95), rgba(60,42,16,0.98));
+        border-radius: 3px 3px 0 0; border: 1px solid rgba(255,255,255,0.16);
+      }
+      #preloader .pre-stream {
+        position: absolute; left: 93px; top: 74px;
+        width: 4px; height: 0; border-radius: 2px; opacity: 0;
+        background: linear-gradient(to bottom, #FFD98A, #E7A93D);
+        animation: pre-stream-flow 2600ms ease-in-out infinite;
+      }
+      @keyframes pre-stream-flow {
+        0%, 9%    { height: 0; opacity: 0; }
+        11%       { height: 62px; opacity: 1; }
+        80%       { height: 26px; opacity: 1; }
+        84%, 100% { height: 0; opacity: 0; }
+      }
+      #preloader .pre-glass {
+        position: absolute; left: 76px; top: 90px;
+        width: 38px; height: 46px; overflow: hidden;
+        background: rgba(255,255,255,0.04);
+        border: 2px solid rgba(255,255,255,0.38); border-top: none;
+        border-radius: 3px 3px 11px 11px;
+      }
+      #preloader .pre-glass-fill {
+        position: absolute; bottom: 0; left: 0; width: 100%; height: 0%;
+        background: linear-gradient(180deg, #FFD98A, #D98C2B);
+        border-radius: 0 0 9px 9px;
+        animation: pre-glass-fill 2600ms ease-in-out infinite;
+      }
+      @keyframes pre-glass-fill {
+        0%, 10% { height: 0%; }
+        80%     { height: 78%; }
+        90%, 100% { height: 0%; }
+      }
+      #preloader .pre-label {
+        font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12.5px; font-weight: 700;
+        letter-spacing: 1.6px; text-transform: uppercase; color: rgba(255,255,255,0.5);
+        animation: pre-label-pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes pre-label-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+      @media (prefers-reduced-motion: reduce) {
+        #preloader * { animation-duration: 0.01ms !important; }
+      }
     </style>
 
     <!-- fonts start downloading in parallel with the JS bundle instead of after it mounts -->
@@ -19,6 +91,19 @@
     />
   </head>
   <body>
+    <div id="preloader">
+      <div class="pre-scene">
+        <div class="pre-bottle">
+          <div class="pre-bottle-neck"></div>
+          <div class="pre-bottle-body"></div>
+        </div>
+        <div class="pre-stream"></div>
+        <div class="pre-glass">
+          <div class="pre-glass-fill"></div>
+        </div>
+      </div>
+      <div class="pre-label">Pouring up the baijiu…</div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

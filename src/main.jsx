@@ -7,3 +7,6 @@ createRoot(document.getElementById("root")).render(
     <BirthdayInvite />
   </StrictMode>
 );
+
+// hand off from the static pre-JS loader to React's own boot animation
+document.getElementById("preloader")?.remove();
