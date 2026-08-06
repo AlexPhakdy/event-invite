@@ -207,7 +207,11 @@ export default function BirthdayInvite() {
     <div
       className="inv-root"
       style={{
-        background: "var(--bg-solid)",
+        // transparent on purpose — html/body carry the solid color (set in index.html) and
+        // .party-bg is the real fixed, full-screen layer; a THIRD opaque layer here, sized
+        // only to this div's content box, is exactly what can leave Safari's safe-area
+        // (behind the collapsible toolbars) unpainted or sampling the wrong color
+        background: "transparent",
         minHeight: "100dvh",
         position: "relative",
         overflow: "hidden",
