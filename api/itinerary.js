@@ -57,6 +57,7 @@ export default async function handler(req, res) {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         title,
         time: String(body.time || "").trim().slice(0, 40),
+        location: String(body.location || "").trim().slice(0, 80),
         description: String(body.description || "").trim().slice(0, 300),
         ts: Date.now(),
       };
@@ -95,6 +96,7 @@ export default async function handler(req, res) {
         ...existing,
         title: body.title !== undefined ? String(body.title).trim().slice(0, 60) || existing.title : existing.title,
         time: body.time !== undefined ? String(body.time).trim().slice(0, 40) : existing.time,
+        location: body.location !== undefined ? String(body.location).trim().slice(0, 80) : existing.location,
         description:
           body.description !== undefined ? String(body.description).trim().slice(0, 300) : existing.description,
       };

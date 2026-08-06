@@ -15,6 +15,36 @@ import {
 
 const TIMELINE_COLORS = ["#4ADE80", "#FBBF24", "#60A5FA", "#F472B6", "#93A980", "#F87171"];
 
+// Cached in sessionStorage (not localStorage) on purpose — "this session" should mean
+// this tab, cleared when it's closed, not a permanent login. The code is still validated
+// server-side on every request; this only skips re-prompting client-side.
+const ADMIN_CODE_KEY = "adminCode";
+
+function getAdminCode(promptMessage) {
+  try {
+    const cached = sessionStorage.getItem(ADMIN_CODE_KEY);
+    if (cached) return cached;
+  } catch (e) {
+    // sessionStorage unavailable (private browsing etc.) — fall through to prompting
+  }
+  const entered = window.prompt(promptMessage);
+  if (!entered) return null;
+  try {
+    sessionStorage.setItem(ADMIN_CODE_KEY, entered);
+  } catch (e) {
+    // ignore — worst case it just prompts again next time
+  }
+  return entered;
+}
+
+function forgetAdminCode() {
+  try {
+    sessionStorage.removeItem(ADMIN_CODE_KEY);
+  } catch (e) {
+    // ignore
+  }
+}
+
 const FALL_MS = 900;
 const CLAIM_MS = 320;
 const LAND_SCALE = 1.5;
@@ -203,74 +233,95 @@ export default function BirthdayInvite() {
     }, 1200);
     if (s.count >= 5) {
       s.count = 0;
-      const code = window.prompt("Enter the code to clear the ENTIRE guest list:");
+      const code = getAdminCode("Enter the code to clear the ENTIRE guest list:");
       if (!code) return;
       (async () => {
         try {
           await clearGuests(code);
           setGuests([]);
         } catch (e) {
+          if (e instanceof WrongCodeError) forgetAdminCode();
           window.alert(e instanceof WrongCodeError ? "Wrong code." : "Couldn't clear the list.");
         }
       })();
     }
   }
 
-  // long-press a guest row -> code prompt -> host view where their RSVP can be edited.
-  // The code isn't verified here; it's sent with the save/remove request and validated
-  // server-side, so there's no way to bypass it by poking at the client.
+  // long-press a guest row -> code prompt (skipped if already entered this session) ->
+  // host view where their RSVP can be edited. The code isn't verified here; it's sent
+  // with the save/remove request and validated server-side, so there's no way to bypass
+  // it by poking at the client.
   function handleLongPressGuest(guest) {
-    const code = window.prompt(`Manage ${guest.name}'s RSVP — enter the code:`);
+    const code = getAdminCode(`Manage ${guest.name}'s RSVP — enter the code:`);
     if (!code) return;
     setAdminCode(code);
     setAdminGuest(guest);
   }
 
   async function handleAdminSave(patch) {
-    const saved = await updateGuest(adminGuest.id, patch, adminCode);
-    setGuests((prev) => prev.map((g) => (g.id === adminGuest.id ? { ...g, ...(saved || patch) } : g)));
-    setAdminGuest(null);
+    try {
+      const saved = await updateGuest(adminGuest.id, patch, adminCode);
+      setGuests((prev) => prev.map((g) => (g.id === adminGuest.id ? { ...g, ...(saved || patch) } : g)));
+      setAdminGuest(null);
+    } catch (e) {
+      if (e instanceof WrongCodeError) forgetAdminCode();
+      throw e;
+    }
   }
 
   async function handleAdminDelete() {
-    await deleteGuest(adminGuest.id, adminCode);
-    setGuests((prev) => prev.filter((g) => g.id !== adminGuest.id));
-    setAdminGuest(null);
+    try {
+      await deleteGuest(adminGuest.id, adminCode);
+      setGuests((prev) => prev.filter((g) => g.id !== adminGuest.id));
+      setAdminGuest(null);
+    } catch (e) {
+      if (e instanceof WrongCodeError) forgetAdminCode();
+      throw e;
+    }
   }
 
   function handleAddEventClick() {
-    const code = window.prompt("Enter the code to add an event:");
+    const code = getAdminCode("Enter the code to add an event:");
     if (!code) return;
     setAdminCode(code);
     setAdminEvent(null);
     setShowAddEvent(true);
   }
 
-  // long-press a timeline item -> code prompt -> edit form. Same pattern as the guest
-  // admin flow: the code is only ever handed to the API, never checked here.
+  // long-press a timeline item -> code prompt (skipped if cached) -> edit form.
   function handleLongPressEvent(item) {
-    const code = window.prompt(`Edit "${item.title}" — enter the code:`);
+    const code = getAdminCode(`Edit "${item.title}" — enter the code:`);
     if (!code) return;
     setAdminCode(code);
     setAdminEvent(item);
   }
 
   async function handleEventSave(patch) {
-    if (adminEvent) {
-      const saved = await updateItineraryItem(adminEvent.id, patch, adminCode);
-      setItinerary((prev) => prev.map((i) => (i.id === adminEvent.id ? { ...i, ...(saved || patch) } : i)));
-      setAdminEvent(null);
-    } else {
-      const saved = await addItineraryItem(patch, adminCode);
-      setItinerary((prev) => [...prev, saved]);
-      setShowAddEvent(false);
+    try {
+      if (adminEvent) {
+        const saved = await updateItineraryItem(adminEvent.id, patch, adminCode);
+        setItinerary((prev) => prev.map((i) => (i.id === adminEvent.id ? { ...i, ...(saved || patch) } : i)));
+        setAdminEvent(null);
+      } else {
+        const saved = await addItineraryItem(patch, adminCode);
+        setItinerary((prev) => [...prev, saved]);
+        setShowAddEvent(false);
+      }
+    } catch (e) {
+      if (e instanceof WrongCodeError) forgetAdminCode();
+      throw e;
     }
   }
 
   async function handleEventDelete() {
-    await deleteItineraryItem(adminEvent.id, adminCode);
-    setItinerary((prev) => prev.filter((i) => i.id !== adminEvent.id));
-    setAdminEvent(null);
+    try {
+      await deleteItineraryItem(adminEvent.id, adminCode);
+      setItinerary((prev) => prev.filter((i) => i.id !== adminEvent.id));
+      setAdminEvent(null);
+    } catch (e) {
+      if (e instanceof WrongCodeError) forgetAdminCode();
+      throw e;
+    }
   }
 
   function toggleAttending(key) {
@@ -1571,7 +1622,13 @@ function ItineraryRow({ item, color, onLongPress }) {
       onContextMenu={(e) => e.preventDefault()}
     >
       <span className="itinerary-dot" style={{ background: color, boxShadow: `0 0 0 3px ${color}33` }} />
-      {item.time && <div className="itinerary-time">{item.time}</div>}
+      {(item.time || item.location) && (
+        <div className="itinerary-time">
+          {item.time}
+          {item.time && item.location && " · "}
+          {item.location && `@ ${item.location}`}
+        </div>
+      )}
       <div className="itinerary-title">{item.title}</div>
       {item.description && <div className="itinerary-desc">{item.description}</div>}
     </div>
@@ -1582,6 +1639,7 @@ function ItineraryRow({ item, color, onLongPress }) {
 function EventFormModal({ item, onSave, onDelete, onClose }) {
   const [title, setTitle] = useState(item?.title || "");
   const [time, setTime] = useState(item?.time || "");
+  const [location, setLocation] = useState(item?.location || "");
   const [description, setDescription] = useState(item?.description || "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -1595,7 +1653,7 @@ function EventFormModal({ item, onSave, onDelete, onClose }) {
     setBusy(true);
     setErr("");
     try {
-      await onSave({ title: title.trim(), time: time.trim(), description: description.trim() });
+      await onSave({ title: title.trim(), time: time.trim(), location: location.trim(), description: description.trim() });
     } catch (e) {
       setErr(e instanceof WrongCodeError ? "Wrong code." : "Couldn't save the event.");
       setBusy(false);
@@ -1636,13 +1694,24 @@ function EventFormModal({ item, onSave, onDelete, onClose }) {
             maxLength={60}
             onChange={(e) => setTitle(e.target.value)}
           />
-          <input
-            className="field"
-            placeholder="Time (e.g. 7:00 PM)"
-            value={time}
-            maxLength={40}
-            onChange={(e) => setTime(e.target.value)}
-          />
+          <div style={{ display: "flex", gap: 10 }}>
+            <input
+              className="field"
+              placeholder="Time (e.g. 7:00 PM)"
+              value={time}
+              maxLength={40}
+              onChange={(e) => setTime(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <input
+              className="field"
+              placeholder="@ Location"
+              value={location}
+              maxLength={80}
+              onChange={(e) => setLocation(e.target.value)}
+              style={{ flex: 1 }}
+            />
+          </div>
           <textarea
             className="field"
             placeholder="Description (optional)"
