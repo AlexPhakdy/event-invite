@@ -1047,7 +1047,7 @@ export default function BirthdayInvite() {
                     <GuestGroup
                       title="Can't make it"
                       items={declined}
-                      dotColor="rgba(255,255,255,0.4)"
+                      dotColor="#F87171"
                       onSelect={setSelectedGuest}
                       onLongPress={handleLongPressGuest}
                     />
@@ -1224,7 +1224,7 @@ function GuestModal({ guest, onClose }) {
                   ? "#4ADE80"
                   : guest.status === "maybe"
                   ? "#FBBF24"
-                  : "rgba(255,255,255,0.55)",
+                  : "#F87171",
             }}
           >
             {guest.status === "going" ? "Going" : guest.status === "maybe" ? "Maybe" : "Can't go"}
