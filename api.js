@@ -36,11 +36,31 @@ export async function addGuest(entry) {
   return res.json();
 }
 
-export async function clearGuests() {
+// The code is never compared here — it's sent to the API and validated server-side, so it
+// never has to exist in the browser bundle. A wrong code comes back as a 401.
+export class WrongCodeError extends Error {}
+
+async function sendDelete(url, code) {
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: { "x-admin-code": code },
+  });
+  if (res.status === 401) throw new WrongCodeError("Wrong code");
+  if (!res.ok) throw new Error("Delete failed");
+}
+
+export async function clearGuests(code) {
   if (DEV) {
     window.localStorage.removeItem(LOCAL_KEY);
     return;
   }
-  const res = await fetch("/api/guests", { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to clear guests");
+  await sendDelete("/api/guests", code);
+}
+
+export async function deleteGuest(id, code) {
+  if (DEV) {
+    window.localStorage.setItem(LOCAL_KEY, JSON.stringify(readLocal().filter((g) => g.id !== id)));
+    return;
+  }
+  await sendDelete(`/api/guests?id=${encodeURIComponent(id)}`, code);
 }

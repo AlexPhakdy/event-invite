@@ -1,12 +1,23 @@
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+// Set this in the Vercel project's environment variables. Deletes fail closed if it's
+// missing, so an unconfigured deploy can never have its guest list wiped.
+const ADMIN_CODE = process.env.ADMIN_CODE;
 const KEY = "guests";
 const STATUSES = ["going", "maybe", "declined"];
 const EVENT_KEYS = ["day", "dinner", "night"];
 
+// POST-with-body form of the Upstash REST API rather than encoding the command into the
+// URL path — deleting a single guest sends its full JSON payload as an argument, which is
+// far too long/awkward to be a path segment.
 async function redis(command) {
-  const res = await fetch(`${UPSTASH_URL}/${command.map(encodeURIComponent).join("/")}`, {
-    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+  const res = await fetch(UPSTASH_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${UPSTASH_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(command),
   });
   if (!res.ok) throw new Error(`Redis command failed: ${res.status}`);
   const data = await res.json();
@@ -15,15 +26,8 @@ async function redis(command) {
 
 export default async function handler(req, res) {
   if (!UPSTASH_URL || !UPSTASH_TOKEN) {
-    // TEMPORARY diagnostic — reports presence/length only, never the actual secret values.
     res.status(500).json({
       error: "Storage isn't configured — set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in the Vercel project's environment variables.",
-      debug: {
-        urlPresent: Boolean(UPSTASH_URL),
-        urlLength: UPSTASH_URL ? UPSTASH_URL.length : 0,
-        tokenPresent: Boolean(UPSTASH_TOKEN),
-        tokenLength: UPSTASH_TOKEN ? UPSTASH_TOKEN.length : 0,
-      },
     });
     return;
   }
@@ -57,6 +61,34 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "DELETE") {
+      // Checked here rather than in the UI on purpose: a client-side-only prompt would be
+      // cosmetic, since the endpoint can be hit directly with curl.
+      const supplied = req.headers["x-admin-code"];
+      if (!ADMIN_CODE || supplied !== ADMIN_CODE) {
+        res.status(401).json({ error: "Wrong code" });
+        return;
+      }
+
+      const id = req.query?.id;
+      if (id) {
+        // Redis LREM matches on the exact stored string, so find the raw entry first
+        const raw = await redis(["LRANGE", KEY, "0", "-1"]);
+        const match = (raw || []).find((s) => {
+          try {
+            return JSON.parse(s).id === id;
+          } catch {
+            return false;
+          }
+        });
+        if (!match) {
+          res.status(404).json({ error: "Guest not found" });
+          return;
+        }
+        await redis(["LREM", KEY, "1", match]);
+        res.status(200).json({ ok: true });
+        return;
+      }
+
       await redis(["DEL", KEY]);
       res.status(200).json({ ok: true });
       return;

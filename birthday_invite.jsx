@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { MapPin, Calendar, Check, Loader2, Ticket as TicketIcon, X, ChevronRight } from "lucide-react";
-import { fetchGuests, addGuest, clearGuests } from "./api.js";
+import { fetchGuests, addGuest, clearGuests, deleteGuest, WrongCodeError } from "./api.js";
 
 const FALL_MS = 900;
 const CLAIM_MS = 320;
@@ -13,6 +13,29 @@ const EVENTS = [
   { key: "dinner", label: "Dinner", icon: "🍽️" },
   { key: "night", label: "Night Outing", icon: "🌙" },
 ];
+
+// Sept 19 2026, 9pm local — the countdown target
+const EVENT_DATE = new Date(2026, 8, 19, 21, 0, 0);
+
+// Per-stop venues live in the itinerary (added closer to the date), so this is just the
+// city-level anchor rather than a single address.
+const CITY = "Charlotte, NC";
+
+function useCountdown(target) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const diff = target.getTime() - now;
+  if (diff <= 0) return null;
+  return {
+    days: Math.floor(diff / 86400000),
+    hours: Math.floor((diff / 3600000) % 24),
+    minutes: Math.floor((diff / 60000) % 60),
+    seconds: Math.floor((diff / 1000) % 60),
+  };
+}
 
 export default function BirthdayInvite() {
   // idle -> printing -> falling -> landed -> claiming -> claimed
@@ -148,17 +171,31 @@ export default function BirthdayInvite() {
     }, 1200);
     if (s.count >= 5) {
       s.count = 0;
-      if (window.confirm("Clear the entire guest list? This can't be undone.")) {
-        (async () => {
-          try {
-            await clearGuests();
-            setGuests([]);
-          } catch (e) {
-            // ignore — nothing to clear if storage isn't reachable
-          }
-        })();
-      }
+      const code = window.prompt("Enter the code to clear the ENTIRE guest list:");
+      if (!code) return;
+      (async () => {
+        try {
+          await clearGuests(code);
+          setGuests([]);
+        } catch (e) {
+          window.alert(e instanceof WrongCodeError ? "Wrong code." : "Couldn't clear the list.");
+        }
+      })();
     }
+  }
+
+  // long-press a guest row to remove just that one
+  function handleDeleteGuest(guest) {
+    const code = window.prompt(`Remove ${guest.name} from the list? Enter the code:`);
+    if (!code) return;
+    (async () => {
+      try {
+        await deleteGuest(guest.id, code);
+        setGuests((prev) => prev.filter((g) => g.id !== guest.id));
+      } catch (e) {
+        window.alert(e instanceof WrongCodeError ? "Wrong code." : "Couldn't remove that guest.");
+      }
+    })();
   }
 
   function toggleAttending(key) {
@@ -277,6 +314,17 @@ export default function BirthdayInvite() {
           box-shadow: 0 10px 26px -6px rgba(0,0,0,0.5);
         }
 
+        .ghost-btn {
+          padding: 12px 22px; font-size: 14px;
+          background: rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,0.2);
+          color: #fff;
+          display: inline-flex; align-items: center; gap: 8px;
+          transition: background .2s ease, border-color .2s ease, transform .3s cubic-bezier(.22,1,.36,1);
+        }
+        .ghost-btn:hover { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.35); }
+
+
         .field {
           width: 100%; background: rgba(0,0,0,0.24); border: 1px solid rgba(255,255,255,0.16);
           color: #fff; border-radius: 14px; padding: 13px 15px; font-size: 15px;
@@ -355,6 +403,15 @@ export default function BirthdayInvite() {
           transform: translateY(-1px); box-shadow: 0 6px 14px -4px rgba(0,0,0,0.5);
         }
         .guest-row:active { transform: scale(0.98) translateY(0); }
+        /* visible feedback that a long-press is in progress, so the delete prompt doesn't
+           appear out of nowhere. Also suppresses the iOS text-selection/callout on hold. */
+        .guest-row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+        .guest-row-pressing {
+          transform: scale(0.97);
+          border-color: rgba(255,120,120,0.55) !important;
+          background: rgba(255,90,90,0.12) !important;
+          transition: transform ${LONG_PRESS_MS}ms ease, background .2s ease, border-color .2s ease;
+        }
         .guest-row-name { font-weight: 700; font-size: 13.5px; flex-shrink: 0; }
         .guest-row-events { font-size: 12px; flex-shrink: 0; opacity: 0.9; }
         .guest-row-chevron { flex-shrink: 0; margin-left: auto; opacity: 0.45; transition: opacity .2s ease, transform .2s ease; }
@@ -541,6 +598,15 @@ export default function BirthdayInvite() {
           position: relative; z-index: 1;
           font-size: 12.5px; font-weight: 700; letter-spacing: 0.4px; color: rgba(255,255,255,0.88); line-height: 1.6;
         }
+        .ticket-countdown {
+          position: relative; z-index: 1;
+          margin-top: 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+          color: rgba(255,255,255,0.5); font-variant-numeric: tabular-nums;
+        }
+        .ticket-countdown span { color: #fff; font-weight: 800; font-size: 13px; }
+        .ticket-metal-expanded .ticket-countdown { font-size: 12.5px; margin-top: 16px; }
+        .ticket-metal-expanded .ticket-countdown span { font-size: 15px; }
+
         .ticket-bottom {
           position: relative; z-index: 1;
           margin-top: 18px; display: flex; align-items: flex-end; justify-content: space-between; gap: 10px;
@@ -763,9 +829,9 @@ export default function BirthdayInvite() {
               <div className="serif" style={{ fontSize: 21, marginBottom: 4, fontWeight: 600 }}>
                 RSVP below:
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--muted)", marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--muted)", marginBottom: 20, flexWrap: "wrap" }}>
                 <Calendar size={13} /> Sat, Sept 19, 2026
-                <MapPin size={13} style={{ marginLeft: 8 }} /> Charlotte, NC
+                <MapPin size={13} style={{ marginLeft: 8 }} /> {CITY}
               </div>
 
               {submitted ? (
@@ -935,32 +1001,40 @@ export default function BirthdayInvite() {
               ) : (
                 <div style={{ display: "grid", gap: 22 }}>
                   {going.length > 0 && (
-                    <GuestGroup title="Going" items={going} dotColor="#4ADE80" onSelect={setSelectedGuest} />
+                    <GuestGroup
+                      title="Going"
+                      items={going}
+                      dotColor="#4ADE80"
+                      onSelect={setSelectedGuest}
+                      onDelete={handleDeleteGuest}
+                    />
                   )}
                   {maybe.length > 0 && (
-                    <GuestGroup title="Maybe" items={maybe} dotColor="#FBBF24" onSelect={setSelectedGuest} />
+                    <GuestGroup
+                      title="Maybe"
+                      items={maybe}
+                      dotColor="#FBBF24"
+                      onSelect={setSelectedGuest}
+                      onDelete={handleDeleteGuest}
+                    />
                   )}
                   {declined.length > 0 && (
-                    <GuestGroup title="Can't make it" items={declined} dotColor="rgba(255,255,255,0.4)" onSelect={setSelectedGuest} />
+                    <GuestGroup
+                      title="Can't make it"
+                      items={declined}
+                      dotColor="rgba(255,255,255,0.4)"
+                      onSelect={setSelectedGuest}
+                      onDelete={handleDeleteGuest}
+                    />
                   )}
                 </div>
               )}
             </div>
 
             <button
-              className="pill-btn"
+              className="pill-btn ghost-btn"
+              style={{ marginTop: 26 }}
               onClick={() => setShowItinerary(true)}
-              style={{
-                marginTop: 26,
-                padding: "12px 24px",
-                background: "rgba(255,255,255,0.08)",
-                border: "1px solid rgba(255,255,255,0.2)",
-                color: "#fff",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 14,
-              }}
             >
               <Calendar size={16} /> See Itinerary
             </button>
@@ -975,6 +1049,7 @@ export default function BirthdayInvite() {
 }
 
 function TicketCard({ going = 0, docked = false, expanded = false }) {
+  const left = useCountdown(EVENT_DATE);
   return (
     <div className={`ticket-metal ${docked ? "ticket-metal-docked" : ""} ${expanded ? "ticket-metal-expanded" : ""}`}>
       <div className="ticket-sheen" />
@@ -989,8 +1064,14 @@ function TicketCard({ going = 0, docked = false, expanded = false }) {
       <div className="ticket-details">
         SAT, SEPT 19, 2026
         <br />
-        CHARLOTTE, NC
+        {CITY.toUpperCase()}
       </div>
+      {left && (
+        <div className="ticket-countdown">
+          <span>{left.days}</span>d <span>{left.hours}</span>h <span>{left.minutes}</span>m{" "}
+          <span>{left.seconds}</span>s
+        </div>
+      )}
       <div className="ticket-bottom">
         <FauxQR />
         <div className="ticket-going">{going} GOING</div>
@@ -1025,7 +1106,7 @@ function FauxQR() {
   );
 }
 
-function GuestGroup({ title, items, dotColor, onSelect }) {
+function GuestGroup({ title, items, dotColor, onSelect, onDelete }) {
   return (
     <div>
       <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 10, fontWeight: 800, opacity: 0.9 }}>
@@ -1033,22 +1114,67 @@ function GuestGroup({ title, items, dotColor, onSelect }) {
       </div>
       <div style={{ display: "grid", gap: 6 }}>
         {items.map((g) => (
-          <button key={g.id} className="guest-row" onClick={() => onSelect(g)}>
-            <span className="dot" style={{ background: dotColor, flexShrink: 0 }} />
-            <span className="guest-row-name">{g.name}</span>
-            {g.attending?.length > 0 && (
-              <span className="guest-row-events">
-                {EVENTS.filter((ev) => g.attending.includes(ev.key))
-                  .map((ev) => ev.icon)
-                  .join(" ")}
-              </span>
-            )}
-            {g.note && <span className="guest-row-note">&ldquo;{g.note}&rdquo;</span>}
-            <ChevronRight size={15} className="guest-row-chevron" />
-          </button>
+          <GuestRow key={g.id} guest={g} dotColor={dotColor} onSelect={onSelect} onDelete={onDelete} />
         ))}
       </div>
     </div>
+  );
+}
+
+const LONG_PRESS_MS = 600;
+
+function GuestRow({ guest, dotColor, onSelect, onDelete }) {
+  const timer = useRef(null);
+  // set when a long-press fires so the click that follows the release doesn't also open
+  // the detail modal
+  const firedRef = useRef(false);
+  const [pressing, setPressing] = useState(false);
+
+  function start() {
+    firedRef.current = false;
+    setPressing(true);
+    timer.current = setTimeout(() => {
+      firedRef.current = true;
+      setPressing(false);
+      onDelete(guest);
+    }, LONG_PRESS_MS);
+  }
+
+  function cancel() {
+    clearTimeout(timer.current);
+    setPressing(false);
+  }
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  return (
+    <button
+      className={`guest-row ${pressing ? "guest-row-pressing" : ""}`}
+      onClick={() => {
+        if (firedRef.current) {
+          firedRef.current = false;
+          return;
+        }
+        onSelect(guest);
+      }}
+      onPointerDown={start}
+      onPointerUp={cancel}
+      onPointerLeave={cancel}
+      onPointerCancel={cancel}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <span className="dot" style={{ background: dotColor, flexShrink: 0 }} />
+      <span className="guest-row-name">{guest.name}</span>
+      {guest.attending?.length > 0 && (
+        <span className="guest-row-events">
+          {EVENTS.filter((ev) => guest.attending.includes(ev.key))
+            .map((ev) => ev.icon)
+            .join(" ")}
+        </span>
+      )}
+      {guest.note && <span className="guest-row-note">&ldquo;{guest.note}&rdquo;</span>}
+      <ChevronRight size={15} className="guest-row-chevron" />
+    </button>
   );
 }
 
