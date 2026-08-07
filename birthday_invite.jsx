@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock } from "lucide-react";
+import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft } from "lucide-react";
 import {
   fetchGuests,
   addGuest,
@@ -121,6 +121,92 @@ const EVENT_DATE = new Date(2026, 8, 19, 21, 0, 0);
 // city-level anchor rather than a single address.
 const CITY = "Charlotte, NC";
 
+function crc32(bytes) {
+  let crc = ~0;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i];
+    for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return ~crc >>> 0;
+}
+
+// hand-rolled, uncompressed ("stored") ZIP writer — the desktop fallback for saving
+// multiple photos at once, used only when the Web Share API's multi-file share isn't
+// available. No compression means no dependency and no worker thread, at the cost of a
+// slightly bigger file than a real zip library would produce.
+async function filesToZipBlob(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const nameBytes = encoder.encode(file.name);
+    const data = new Uint8Array(await file.arrayBuffer());
+    const crc = crc32(data);
+    const size = data.length;
+
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(4, 20, true);
+    local.setUint16(6, 0, true);
+    local.setUint16(8, 0, true);
+    local.setUint16(10, 0, true);
+    local.setUint16(12, 0, true);
+    local.setUint32(14, crc, true);
+    local.setUint32(18, size, true);
+    local.setUint32(22, size, true);
+    local.setUint16(26, nameBytes.length, true);
+    local.setUint16(28, 0, true);
+    localParts.push(new Uint8Array(local.buffer), nameBytes, data);
+
+    const central = new DataView(new ArrayBuffer(46));
+    central.setUint32(0, 0x02014b50, true);
+    central.setUint16(4, 20, true);
+    central.setUint16(6, 20, true);
+    central.setUint16(8, 0, true);
+    central.setUint16(10, 0, true);
+    central.setUint16(12, 0, true);
+    central.setUint16(14, 0, true);
+    central.setUint32(16, crc, true);
+    central.setUint32(20, size, true);
+    central.setUint32(24, size, true);
+    central.setUint16(28, nameBytes.length, true);
+    central.setUint16(30, 0, true);
+    central.setUint16(32, 0, true);
+    central.setUint16(34, 0, true);
+    central.setUint16(36, 0, true);
+    central.setUint32(38, 0, true);
+    central.setUint32(42, offset, true);
+    centralParts.push(new Uint8Array(central.buffer), nameBytes);
+
+    offset += 30 + nameBytes.length + size;
+  }
+
+  const centralStart = offset;
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, files.length, true);
+  end.setUint16(10, files.length, true);
+  end.setUint32(12, centralSize, true);
+  end.setUint32(16, centralStart, true);
+
+  return new Blob([...localParts, ...centralParts, new Uint8Array(end.buffer)], { type: "application/zip" });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // downscales + re-encodes to JPEG client-side before upload — phone camera photos are
 // easily 4-8MB, which is slow to upload and wasteful to store for a shared album
 function resizeImageToDataUrl(file, maxDim = 1600, quality = 0.82) {
@@ -173,15 +259,7 @@ function downloadInviteIcs() {
     "END:VCALENDAR",
   ].join("\r\n");
 
-  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "alex-and-kylie-birthday.ics";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  downloadBlob(new Blob([ics], { type: "text/calendar;charset=utf-8" }), "alex-and-kylie-birthday.ics");
 }
 
 function useCountdown(target) {
@@ -677,14 +755,62 @@ export default function BirthdayInvite() {
         .itinerary-title { font-size: 15.5px; font-weight: 700; }
         .itinerary-desc { font-size: 13px; opacity: 0.7; margin-top: 4px; line-height: 1.5; }
 
-        .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-        .photo-tile {
-          position: relative; width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden;
-          background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+        /* the album is its own full screen (not a modal), swapped in for .page-content */
+        .album-screen {
+          padding-top: calc(108px + env(safe-area-inset-top));
+          padding-bottom: max(110px, calc(96px + env(safe-area-inset-bottom)));
         }
-        .photo-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        /* fixed so Back/Select stay put while the photo list scrolls underneath — a fading
+           scrim (not a solid bar) so it doesn't hard-clip whatever photo is behind it */
+        .album-topbar {
+          position: fixed; top: 0; left: 0; right: 0; z-index: 25;
+          display: flex; align-items: center; justify-content: space-between;
+          padding: max(16px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 24px
+            max(20px, env(safe-area-inset-left));
+          background: linear-gradient(to bottom, rgba(10,8,14,0.85) 0%, rgba(10,8,14,0.5) 60%, transparent 100%);
+          pointer-events: none;
+        }
+        .album-topbar-btn {
+          pointer-events: auto; cursor: pointer;
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 9px 16px; border-radius: 999px;
+          border: 1px solid rgba(255,255,255,0.22);
+          background: rgba(30,26,38,0.6);
+          backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+          color: #fff; font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 700; font-size: 13px;
+          transition: background .2s ease, border-color .2s ease, transform .15s ease;
+        }
+        .album-topbar-btn:hover { background: rgba(255,255,255,0.16); border-color: rgba(255,255,255,0.4); }
+        .album-topbar-btn:active { transform: scale(0.94); }
+        .album-view-toggle {
+          display: flex; align-items: center; gap: 12px; align-self: center; margin-bottom: 20px;
+          font-family: 'Plus Jakarta Sans', sans-serif; font-size: 13.5px; font-weight: 800;
+          letter-spacing: 0.3px;
+        }
+        .album-view-toggle button {
+          background: none; border: none; cursor: pointer; padding: 4px 2px;
+          color: rgba(255,255,255,0.4); transition: color .2s ease;
+        }
+        .album-view-toggle button.active { color: #fff; }
+        .album-view-divider { width: 1px; height: 14px; background: rgba(255,255,255,0.22); }
+
+        .album-list { display: flex; flex-direction: column; gap: 18px; width: 100%; }
+        /* bigger than the original small-tile grid — two columns, not three */
+        .album-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; width: 100%; }
+        /* same dark-metal treatment as the ticket card, one big card per photo */
+        .album-card {
+          position: relative; width: 100%; aspect-ratio: 4 / 5; max-height: 58vh; border-radius: 22px; overflow: hidden;
+          background: linear-gradient(155deg, #2A2534 0%, #14111B 60%, #0A0810 100%);
+          border: 1px solid rgba(255,255,255,0.09);
+          box-shadow: 0 20px 44px -14px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08);
+          transition: transform .15s ease;
+        }
+        .album-grid .album-card { aspect-ratio: 1; border-radius: 18px; }
+        .album-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .photo-tile-selectable { cursor: pointer; }
+        .photo-tile-selectable:active { transform: scale(0.97); }
         .photo-delete {
-          position: absolute; top: 5px; right: 5px; width: 24px; height: 24px; border-radius: 50%;
+          position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border-radius: 50%;
           background: rgba(10,8,14,0.72); border: 1px solid rgba(255,255,255,0.25); color: #FF9B9B;
           display: flex; align-items: center; justify-content: center; cursor: pointer;
           backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
@@ -692,6 +818,57 @@ export default function BirthdayInvite() {
         }
         .photo-delete:hover { background: rgba(255,90,90,0.3); }
         .photo-delete:active { transform: scale(0.9); }
+        .photo-select-mark {
+          position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; border-radius: 50%;
+          background: rgba(10,8,14,0.6); border: 1.5px solid rgba(255,255,255,0.5);
+          display: flex; align-items: center; justify-content: center; color: #fff;
+          backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+          transition: background .2s ease, border-color .2s ease;
+        }
+        .photo-tile-selected .photo-select-mark {
+          background: var(--accent-b); border-color: var(--accent-b);
+        }
+        .photo-tile-selected { outline: 2px solid var(--accent-b); outline-offset: 2px; }
+
+        /* "+" upload button — pinned to the viewport so it's reachable no matter how far
+           you've scrolled through the album */
+        .album-fab {
+          position: fixed; z-index: 20; border: none; cursor: pointer;
+          right: max(22px, env(safe-area-inset-right)); bottom: max(22px, env(safe-area-inset-bottom));
+          width: 66px; height: 66px; border-radius: 50%;
+          background: linear-gradient(135deg, var(--accent-a), var(--accent-b));
+          color: #fff; display: flex; align-items: center; justify-content: center;
+          box-shadow: 0 14px 30px -8px rgba(0,0,0,0.6), 0 0 0 0 rgba(147,169,128,0.5);
+          transition: transform .35s cubic-bezier(.34,1.56,.64,1), box-shadow .35s ease;
+          /* fab-pop has no fill-mode, so once it finishes (0.5s) the transform property is
+             free again for the :active transition below — an indefinite fill would win over
+             that transition permanently, since animations always beat transitions on a
+             shared property while in effect */
+          animation: fab-pop .5s cubic-bezier(.34,1.56,.64,1), fab-breathe 2.8s ease-in-out .5s infinite;
+        }
+        .album-fab svg { transition: transform .3s cubic-bezier(.34,1.56,.64,1); }
+        .album-fab:hover svg { transform: rotate(90deg); }
+        .album-fab:active { transform: scale(0.88); }
+        .album-fab:active svg { transform: rotate(135deg); }
+        .album-fab:disabled { opacity: 0.6; cursor: default; animation: none; }
+        @keyframes fab-pop {
+          0% { transform: scale(0) rotate(-45deg); opacity: 0; }
+          70% { transform: scale(1.12) rotate(6deg); opacity: 1; }
+          100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+        @keyframes fab-breathe {
+          0%, 100% { box-shadow: 0 14px 30px -8px rgba(0,0,0,0.6), 0 0 0 0 rgba(147,169,128,0.45); }
+          50% { box-shadow: 0 14px 30px -8px rgba(0,0,0,0.6), 0 0 0 10px rgba(147,169,128,0); }
+        }
+        .album-select-bar {
+          align-self: center; margin-top: 22px;
+          display: flex; align-items: center; gap: 14px;
+          background: rgba(20,17,27,0.92);
+          backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+          border: 1px solid rgba(255,255,255,0.14); border-radius: 999px;
+          padding: 10px 10px 10px 18px;
+          box-shadow: 0 14px 30px -8px rgba(0,0,0,0.6);
+        }
 
         .time-picker { display: flex; align-items: center; gap: 6px; }
         .time-picker-select {
@@ -973,6 +1150,52 @@ export default function BirthdayInvite() {
           transition: transform .25s cubic-bezier(.22,1,.36,1);
         }
         .ticket-metal.ticket-metal-docked { --width: min(78vw, 300px); }
+
+        /* ---- flip-to-photo interaction (docked ticket only) ---- */
+        .ticket-flip-outer { display: flex; flex-direction: column; align-items: center; perspective: 1600px; }
+        .ticket-flip-card {
+          position: relative; width: fit-content; cursor: pointer;
+          transform-style: preserve-3d; transition: transform .7s cubic-bezier(.4,.2,.2,1);
+        }
+        .ticket-flip-card.is-flipped { transform: rotateY(180deg); }
+        .ticket-flip-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+        .ticket-flip-front { position: relative; }
+        /* back face is absolutely positioned over the front's box — the front stays in
+           normal flow so it's what actually gives the card its height */
+        .ticket-flip-back {
+          position: absolute; inset: 0; transform: rotateY(180deg);
+          border-radius: 22px; overflow: hidden;
+          background: linear-gradient(155deg, #2A2534 0%, #14111B 60%, #0A0810 100%);
+          border: 1px solid rgba(255,255,255,0.09);
+          box-shadow: 0 20px 44px -14px rgba(0,0,0,0.6);
+          display: flex; align-items: center; justify-content: center;
+        }
+        .ticket-flip-back img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .ticket-photo-caption {
+          position: absolute; left: 0; right: 0; bottom: 0;
+          padding: 34px 18px 16px;
+          background: linear-gradient(to top, rgba(10,8,14,0.88) 0%, rgba(10,8,14,0.4) 55%, transparent 100%);
+          font-family: 'Fraunces', serif; font-weight: 600; font-size: 15.5px; letter-spacing: 0.3px;
+          color: #fff; text-align: center;
+        }
+        .ticket-photo-caption span { color: var(--accent-b); margin: 0 5px; font-style: italic; }
+        .ticket-photo-subcaption {
+          margin-top: 4px; font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 700;
+          font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; color: rgba(255,255,255,0.5);
+        }
+        .ticket-photo-fallback {
+          display: flex; flex-direction: column; align-items: center; gap: 8px;
+          color: rgba(255,255,255,0.35); font-size: 11px; text-align: center; padding: 20px;
+        }
+        .ticket-flip-hint {
+          margin-top: 14px; background: transparent; border: none; cursor: pointer;
+          display: flex; align-items: center; gap: 6px; color: rgba(255,255,255,0.5);
+          font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12px; font-weight: 700;
+          letter-spacing: 0.3px; padding: 4px 8px; transition: color .2s ease;
+        }
+        .ticket-flip-hint:hover { color: rgba(255,255,255,0.8); }
+        .ticket-flip-hint svg { transition: transform .5s cubic-bezier(.4,.2,.2,1); }
+        .ticket-flip-card.is-flipped ~ .ticket-flip-hint svg { transform: rotate(180deg); }
         .ticket-metal.ticket-metal-expanded {
           padding: 34px 28px 30px;
           border-radius: 22px;
@@ -1008,7 +1231,8 @@ export default function BirthdayInvite() {
           font-size: clamp(38px, 11cqw, 58px);
           display: flex; align-items: baseline; gap: 10px; color: #fff;
         }
-        .ticket-ages span { font-size: 0.4em; color: var(--accent-a); transition: color 0.5s ease; }
+        .ticket-ages span { font-size: 0.4em; color: var(--accent-b); transition: color 0.5s ease; }
+        .ticket-eyebrow .amp { color: var(--accent-b); }
         .ticket-divider-line {
           position: relative; z-index: 1;
           height: 0; margin: 16px 0; border-top: 1px dashed rgba(255,255,255,0.22);
@@ -1257,7 +1481,7 @@ export default function BirthdayInvite() {
         )}
 
         {/* MAIN PAGE — the ticket stays the centerpiece */}
-        {showPage && (
+        {showPage && !showAlbum && (
           <div className="page-content">
             <div className="ticket-docked-wrap">
               <TicketCard going={headcount} docked expanded />
@@ -1497,6 +1721,17 @@ export default function BirthdayInvite() {
           </div>
         )}
 
+        {showPage && showAlbum && (
+          <PhotoAlbumScreen
+            photos={photos}
+            loading={loadingPhotos}
+            myDeviceId={getDeviceId()}
+            onUpload={handlePhotoUpload}
+            onDelete={handlePhotoDelete}
+            onBack={() => setShowAlbum(false)}
+          />
+        )}
+
         {selectedGuest && <GuestModal guest={selectedGuest} onClose={() => setSelectedGuest(null)} />}
         {showItinerary && (
           <ItineraryModal
@@ -1509,16 +1744,6 @@ export default function BirthdayInvite() {
         )}
         {showAlbumLocked && (
           <AlbumLockedModal onEnterCode={handleAlbumUnlockWithCode} onClose={() => setShowAlbumLocked(false)} />
-        )}
-        {showAlbum && (
-          <PhotoAlbumModal
-            photos={photos}
-            loading={loadingPhotos}
-            myDeviceId={getDeviceId()}
-            onUpload={handlePhotoUpload}
-            onDelete={handlePhotoDelete}
-            onClose={() => setShowAlbum(false)}
-          />
         )}
         {adminGuest && (
           <AdminGuestModal
@@ -1546,11 +1771,16 @@ export default function BirthdayInvite() {
 
 function TicketCard({ going = 0, docked = false, expanded = false }) {
   const left = useCountdown(EVENT_DATE);
-  return (
+  const [flipped, setFlipped] = useState(false);
+  const [photoMissing, setPhotoMissing] = useState(false);
+  // only the docked ticket on the claimed page flips — the bare one is still mid-animation
+  const flippable = docked && expanded;
+
+  const front = (
     <div className={`ticket-metal ${docked ? "ticket-metal-docked" : ""} ${expanded ? "ticket-metal-expanded" : ""}`}>
       <div className="ticket-sheen" />
       <div className="ticket-eyebrow">
-        Alex &amp; Kylie
+        <span>Alex <span className="amp">&amp;</span> Kylie</span>
         <span className="ticket-admit">Admit One</span>
       </div>
       <div className="ticket-ages">
@@ -1572,6 +1802,44 @@ function TicketCard({ going = 0, docked = false, expanded = false }) {
         <FauxQR />
         <div className="ticket-going">{going} GOING</div>
       </div>
+    </div>
+  );
+
+  if (!flippable) return front;
+
+  return (
+    <div className="ticket-flip-outer">
+      <div
+        className={`ticket-flip-card ${flipped ? "is-flipped" : ""}`}
+        onClick={() => setFlipped((f) => !f)}
+        role="button"
+        tabIndex={0}
+        aria-label="Flip ticket"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") setFlipped((f) => !f);
+        }}
+      >
+        <div className="ticket-flip-face ticket-flip-front">{front}</div>
+        <div className="ticket-flip-face ticket-flip-back">
+          {photoMissing ? (
+            <div className="ticket-photo-fallback">
+              <Images size={22} style={{ opacity: 0.4 }} />
+              add a photo at /us.png
+            </div>
+          ) : (
+            <>
+              <img src="/us.png" alt="Alex and Kylie" onError={() => setPhotoMissing(true)} />
+              <div className="ticket-photo-caption">
+                Alex <span>&amp;</span> Kylie
+                <div className="ticket-photo-subcaption">"guess where this was taken"</div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      <button type="button" className="ticket-flip-hint" onClick={() => setFlipped((f) => !f)}>
+        <RotateCw size={12} /> Tap to flip
+      </button>
     </div>
   );
 }
@@ -1973,9 +2241,33 @@ function AlbumLockedModal({ onEnterCode, onClose }) {
   );
 }
 
-function PhotoAlbumModal({ photos, loading, myDeviceId, onUpload, onDelete, onClose }) {
+async function saveSelectedPhotos(chosenPhotos) {
+  const files = await Promise.all(
+    chosenPhotos.map(async (p, i) => {
+      const res = await fetch(p.url);
+      const blob = await res.blob();
+      const ext = (blob.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
+      return new File([blob], `alex-and-kylie-${i + 1}.${ext}`, { type: blob.type });
+    })
+  );
+
+  // the real "save multiple to Photos" experience on iOS/Android — the OS share sheet
+  // offers a direct save-all action for a multi-file image share. Falls back to a plain
+  // zip download wherever that isn't available (mainly desktop browsers).
+  if (navigator.canShare && navigator.canShare({ files })) {
+    await navigator.share({ files });
+  } else {
+    downloadBlob(await filesToZipBlob(files), "alex-and-kylie-photos.zip");
+  }
+}
+
+function PhotoAlbumScreen({ photos, loading, myDeviceId, onUpload, onDelete, onBack }) {
   const [uploadProgress, setUploadProgress] = useState(null); // { done, total } while a batch is in flight
   const [error, setError] = useState("");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [saving, setSaving] = useState(false);
+  const [albumView, setAlbumView] = useState("cards"); // "cards" | "grid"
   const fileInputRef = useRef(null);
 
   async function handleFiles(e) {
@@ -2002,16 +2294,60 @@ function PhotoAlbumModal({ photos, loading, myDeviceId, onUpload, onDelete, onCl
     setUploadProgress(null);
   }
 
-  return (
-    <div className="guest-modal-backdrop" onClick={onClose}>
-      <div className="glass-panel guest-modal itinerary-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="guest-modal-close" onClick={onClose} aria-label="Close">
-          <X size={16} />
-        </button>
+  function toggleSelectMode() {
+    setSelectMode((prev) => !prev);
+    setSelected(new Set());
+    setError("");
+  }
 
+  function toggleSelected(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleSaveSelected() {
+    setError("");
+    setSaving(true);
+    try {
+      await saveSelectedPhotos(photos.filter((p) => selected.has(p.id)));
+      setSelectMode(false);
+      setSelected(new Set());
+    } catch (err) {
+      if (err?.name !== "AbortError") setError("Couldn't save those photos — try again");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="album-topbar">
+        <button type="button" className="album-topbar-btn" onClick={onBack}>
+          <ArrowLeft size={15} /> Back
+        </button>
+        {!loading && photos.length > 0 && (
+          <button type="button" className="album-topbar-btn" onClick={toggleSelectMode}>
+            {selectMode ? (
+              <>
+                <X size={13} /> Cancel
+              </>
+            ) : (
+              <>
+                <CheckSquare size={13} /> Select
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
+      <div className="page-content album-screen">
         <div style={{ textAlign: "center", marginBottom: 22 }}>
           <div style={{ fontSize: 30, marginBottom: 6 }}>📸</div>
-          <div className="serif" style={{ fontSize: 20, fontWeight: 600 }}>
+          <div className="serif" style={{ fontSize: 22, fontWeight: 600 }}>
             Photo Album
           </div>
         </div>
@@ -2025,23 +2361,53 @@ function PhotoAlbumModal({ photos, loading, myDeviceId, onUpload, onDelete, onCl
             No photos yet — be the first to add one.
           </div>
         ) : (
-          <div className="photo-grid">
-            {photos.map((p) => (
-              <div key={p.id} className="photo-tile">
-                <img src={p.url} alt="" loading="lazy" />
-                {p.deviceId === myDeviceId && (
-                  <button
-                    type="button"
-                    className="photo-delete"
-                    onClick={() => onDelete(p)}
-                    aria-label="Delete photo"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="album-view-toggle">
+              <button
+                type="button"
+                className={albumView === "cards" ? "active" : ""}
+                onClick={() => setAlbumView("cards")}
+              >
+                Cards
+              </button>
+              <span className="album-view-divider" />
+              <button
+                type="button"
+                className={albumView === "grid" ? "active" : ""}
+                onClick={() => setAlbumView("grid")}
+              >
+                Grid
+              </button>
+            </div>
+
+            <div className={albumView === "cards" ? "album-list" : "album-grid"}>
+              {photos.map((p) => (
+                <div
+                  key={p.id}
+                  className={`album-card ${selectMode ? "photo-tile-selectable" : ""} ${
+                    selectMode && selected.has(p.id) ? "photo-tile-selected" : ""
+                  }`}
+                  onClick={selectMode ? () => toggleSelected(p.id) : undefined}
+                >
+                  <img src={p.url} alt="" loading="lazy" />
+                  {selectMode ? (
+                    <span className="photo-select-mark">{selected.has(p.id) && <Check size={15} />}</span>
+                  ) : (
+                    p.deviceId === myDeviceId && (
+                      <button
+                        type="button"
+                        className="photo-delete"
+                        onClick={() => onDelete(p)}
+                        aria-label="Delete photo"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
         )}
 
         {error && (
@@ -2056,25 +2422,37 @@ function PhotoAlbumModal({ photos, loading, myDeviceId, onUpload, onDelete, onCl
           style={{ display: "none" }}
           onChange={handleFiles}
         />
-        <button
-          className="pill-btn ghost-btn"
-          style={{ marginTop: 22, width: "100%", justifyContent: "center" }}
-          disabled={!!uploadProgress}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {uploadProgress ? (
-            <>
-              <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
-              Uploading {uploadProgress.done}/{uploadProgress.total}...
-            </>
-          ) : (
-            <>
-              <Upload size={16} /> Add Photos
-            </>
-          )}
-        </button>
+
+        {selectMode ? (
+          <div className="album-select-bar">
+            <span style={{ fontSize: 12.5, color: "var(--muted)", whiteSpace: "nowrap" }}>{selected.size} selected</span>
+            <button
+              className="pill-btn pill-primary"
+              style={{ padding: "10px 20px", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 7 }}
+              disabled={selected.size === 0 || saving}
+              onClick={handleSaveSelected}
+            >
+              {saving ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <Share2 size={15} />}
+              Save {selected.size > 0 ? selected.size : ""}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="album-fab"
+            disabled={!!uploadProgress}
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="Add photos"
+          >
+            {uploadProgress ? (
+              <Loader2 size={24} style={{ animation: "spin 1s linear infinite" }} />
+            ) : (
+              <Plus size={29} />
+            )}
+          </button>
+        )}
       </div>
-    </div>
+    </>
   );
 }
 
