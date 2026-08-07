@@ -91,7 +91,7 @@ const BOOT_FADE_MS = 500;
 const GUEST_TABS = [
   { key: "going", label: "Going", color: "#4ADE80" },
   { key: "maybe", label: "Maybe", color: "#FBBF24" },
-  { key: "declined", label: "Can't make it", color: "#F87171" },
+  { key: "declined", label: "Can't go", color: "#F87171" },
 ];
 
 const EVENTS = [
