@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft, SkipForward } from "lucide-react";
+import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft, SkipForward, Camera } from "lucide-react";
 import {
   fetchGuests,
   addGuest,
@@ -47,13 +47,16 @@ function formatTime12(time24) {
   return `${hour12}:${String(minute).padStart(2, "0")} ${meridiem}`;
 }
 
-// events without a valid time sort to the end rather than breaking the sort
+// events without a valid time sort to the end rather than breaking the sort. Times before
+// 6am are treated as the tail end of the night before (post-midnight eats, etc.) rather
+// than the very start of the day, so a 1:40am entry sorts after 11pm instead of before noon.
+function sortKey(time) {
+  if (!/^\d{2}:\d{2}$/.test(time || "")) return Infinity;
+  const [h, m] = time.split(":").map(Number);
+  return (h < 6 ? h + 24 : h) * 60 + m;
+}
 function sortByTime(items) {
-  return [...items].sort((a, b) => {
-    const ta = /^\d{2}:\d{2}$/.test(a.time) ? a.time : "99:99";
-    const tb = /^\d{2}:\d{2}$/.test(b.time) ? b.time : "99:99";
-    return ta.localeCompare(tb);
-  });
+  return [...items].sort((a, b) => sortKey(a.time) - sortKey(b.time));
 }
 
 // Cached in sessionStorage (not localStorage) on purpose — "this session" should mean
@@ -717,7 +720,14 @@ export default function BirthdayInvite() {
         }
         .danger-btn:hover { background: rgba(255,90,90,0.2); border-color: rgba(255,120,120,0.7); }
 
-        .itinerary-modal { max-height: 82vh; overflow-y: auto; }
+        .itinerary-modal {
+          max-height: 82vh; overflow-y: auto;
+          scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.22) transparent;
+        }
+        .itinerary-modal::-webkit-scrollbar { width: 6px; }
+        .itinerary-modal::-webkit-scrollbar-track { background: transparent; }
+        .itinerary-modal::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 999px; }
+        .itinerary-modal::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.36); }
         .itinerary-timeline {
           position: relative; display: grid; gap: 22px; padding-left: 28px;
         }
@@ -2151,6 +2161,31 @@ function AdminGuestModal({ guest, onSave, onDelete, onClose }) {
 }
 
 function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose }) {
+  const captureRef = useRef(null);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSaveImage() {
+    if (!captureRef.current) return;
+    setSaving(true);
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      // fixed solid background rather than relying on the glass panel's translucent
+      // backdrop-filter — html2canvas doesn't render backdrop-filter, so without this the
+      // captured image would come out with a blank/transparent background
+      const canvas = await html2canvas(captureRef.current, {
+        backgroundColor: "#14111B",
+        scale: 2,
+      });
+      canvas.toBlob((blob) => {
+        if (blob) downloadBlob(blob, "alex-and-kylie-itinerary.png");
+      }, "image/png");
+    } catch {
+      // best-effort feature — silently give up rather than blocking the modal
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="guest-modal-backdrop" onClick={onClose}>
       <div className="glass-panel guest-modal itinerary-modal" onClick={(e) => e.stopPropagation()}>
@@ -2158,37 +2193,55 @@ function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose 
           <X size={16} />
         </button>
 
-        <div style={{ textAlign: "center", marginBottom: 22 }}>
-          <div style={{ fontSize: 30, marginBottom: 6 }}>🗓️</div>
-          <div className="serif" style={{ fontSize: 20, fontWeight: 600 }}>
-            Itinerary
+        <div ref={captureRef} style={{ padding: 4 }}>
+          <div style={{ textAlign: "center", marginBottom: 22 }}>
+            <div style={{ fontSize: 30, marginBottom: 6 }}>🗓️</div>
+            <div className="serif" style={{ fontSize: 20, fontWeight: 600 }}>
+              Itinerary
+            </div>
           </div>
-        </div>
 
-        {loading ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, opacity: 0.8, justifyContent: "center" }}>
-            <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> loading...
-          </div>
-        ) : items.length === 0 ? (
-          <div style={{ fontSize: 14.5, color: "var(--muted)", lineHeight: 1.6, textAlign: "center" }}>
-            Check back soon!
-          </div>
-        ) : (
-          <div className="itinerary-timeline">
-            {sortByTime(items).map((item, i) => (
-              <ItineraryRow
-                key={item.id}
-                item={item}
-                color={TIMELINE_COLORS[i % TIMELINE_COLORS.length]}
-                onLongPress={onLongPressEvent}
-              />
-            ))}
-          </div>
-        )}
+          {loading ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, opacity: 0.8, justifyContent: "center" }}>
+              <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> loading...
+            </div>
+          ) : items.length === 0 ? (
+            <div style={{ fontSize: 14.5, color: "var(--muted)", lineHeight: 1.6, textAlign: "center" }}>
+              Check back soon!
+            </div>
+          ) : (
+            <div className="itinerary-timeline">
+              {sortByTime(items).map((item, i) => (
+                <ItineraryRow
+                  key={item.id}
+                  item={item}
+                  color={TIMELINE_COLORS[i % TIMELINE_COLORS.length]}
+                  onLongPress={onLongPressEvent}
+                />
+              ))}
+            </div>
+          )}
+        </div>
 
         <button className="pill-btn ghost-btn" style={{ marginTop: 22, width: "100%", justifyContent: "center" }} onClick={onAddEvent}>
           <Calendar size={16} /> Add Event
         </button>
+
+        {items.length > 0 && (
+          <button
+            className="pill-btn ghost-btn"
+            style={{ marginTop: 10, width: "100%", justifyContent: "center" }}
+            disabled={saving}
+            onClick={handleSaveImage}
+          >
+            {saving ? (
+              <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+            ) : (
+              <Camera size={16} />
+            )}
+            Save Itinerary
+          </button>
+        )}
       </div>
     </div>
   );
