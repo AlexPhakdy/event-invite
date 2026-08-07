@@ -625,7 +625,7 @@ export default function BirthdayInvite() {
         .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 
         .guest-row {
-          display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+          display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; text-align: left;
           background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.16); border-radius: 12px;
           padding: 10px 12px 10px 7px; cursor: pointer; font-family: 'Plus Jakarta Sans', sans-serif;
           box-shadow: 0 2px 6px -2px rgba(0,0,0,0.35);
