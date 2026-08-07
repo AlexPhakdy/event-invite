@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
-import { MapPin, Calendar, Check, Loader2, Ticket as TicketIcon, X, ChevronRight } from "lucide-react";
+import { createPortal } from "react-dom";
+import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight } from "lucide-react";
 import {
   fetchGuests,
   addGuest,
@@ -87,6 +88,12 @@ const LAND_SCALE = 1.5;
 const POUR_MS = 5000;
 const BOOT_FADE_MS = 500;
 
+const GUEST_TABS = [
+  { key: "going", label: "Going", color: "#4ADE80" },
+  { key: "maybe", label: "Maybe", color: "#FBBF24" },
+  { key: "declined", label: "Can't make it", color: "#F87171" },
+];
+
 const EVENTS = [
   { key: "day", label: "Day Hang", icon: "☀️" },
   { key: "dinner", label: "Dinner", icon: "🍽️" },
@@ -99,6 +106,45 @@ const EVENT_DATE = new Date(2026, 8, 19, 21, 0, 0);
 // Per-stop venues live in the itinerary (added closer to the date), so this is just the
 // city-level anchor rather than a single address.
 const CITY = "Charlotte, NC";
+
+// UTC-based, no trailing "Z", stamped to local wall-clock digits — good enough for a
+// single all-day-ish birthday event without pulling in a timezone library.
+function icsStamp(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(
+    date.getMinutes()
+  )}${pad(date.getSeconds())}`;
+}
+
+function downloadInviteIcs() {
+  const start = EVENT_DATE;
+  const end = new Date(start.getTime() + 6 * 60 * 60 * 1000); // rough all-day-outing block
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Alex & Kylie's Birthday//EN",
+    "BEGIN:VEVENT",
+    `UID:alex-kylie-bday-2026@event-invite`,
+    `DTSTAMP:${icsStamp(new Date())}`,
+    `DTSTART:${icsStamp(start)}`,
+    `DTEND:${icsStamp(end)}`,
+    "SUMMARY:Alex & Kylie's Birthday",
+    `LOCATION:${CITY}`,
+    "DESCRIPTION:Alex & Kylie are turning 26 & 23 — see the app for the full itinerary.",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "alex-and-kylie-birthday.ics";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 function useCountdown(target) {
   const [now, setNow] = useState(() => Date.now());
@@ -123,6 +169,7 @@ export default function BirthdayInvite() {
   const ticketRef = useRef(null);
   const [guests, setGuests] = useState([]);
   const [loadingGuests, setLoadingGuests] = useState(true);
+  const [guestTab, setGuestTab] = useState("going");
   const [name, setName] = useState("");
   const [status, setStatus] = useState("going");
   const [attending, setAttending] = useState([]);
@@ -181,6 +228,12 @@ export default function BirthdayInvite() {
   useEffect(() => {
     if (reducedMotion) setStage("claimed");
   }, [reducedMotion]);
+
+  function skipBoot() {
+    setStage("claimed");
+    setBootFading(true);
+    setTimeout(() => setBooting(false), BOOT_FADE_MS);
+  }
 
   function printTicket() {
     if (stage !== "idle") return;
@@ -396,6 +449,9 @@ export default function BirthdayInvite() {
   const maybe = guests.filter((g) => g.status === "maybe");
   const declined = guests.filter((g) => g.status === "declined");
   const headcount = going.length;
+  const guestTabCounts = { going: going.length, maybe: maybe.length, declined: declined.length };
+  const activeGuestGroup = guestTab === "going" ? going : guestTab === "maybe" ? maybe : declined;
+  const activeTabInfo = GUEST_TABS.find((t) => t.key === guestTab);
 
   const showIntro = stage !== "claimed";
   const showMachine = stage === "idle" || stage === "printing";
@@ -623,6 +679,25 @@ export default function BirthdayInvite() {
         .event-chip.active .event-chip-check { background: #4ADE80; border-color: #4ADE80; }
 
         .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+        .guest-tabs {
+          display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto;
+          -ms-overflow-style: none; scrollbar-width: none;
+        }
+        .guest-tabs::-webkit-scrollbar { display: none; }
+        .guest-tab {
+          display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+          background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 999px; padding: 7px 12px; cursor: pointer;
+          font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12.5px; font-weight: 700;
+          color: rgba(255,255,255,0.6); transition: background .2s ease, border-color .2s ease, color .2s ease;
+        }
+        .guest-tab:hover { color: rgba(255,255,255,0.85); }
+        .guest-tab-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .guest-tab-count {
+          font-size: 11px; font-weight: 800; opacity: 0.65; background: rgba(255,255,255,0.1);
+          border-radius: 999px; padding: 1px 6px;
+        }
 
         .guest-row {
           display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; text-align: left;
@@ -944,26 +1019,45 @@ export default function BirthdayInvite() {
         }
         @keyframes boot-label-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 
+        .boot-skip {
+          position: absolute; top: max(18px, env(safe-area-inset-top));
+          right: max(18px, env(safe-area-inset-right));
+          background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2);
+          border-radius: 999px; padding: 7px 16px; font-family: 'Plus Jakarta Sans', sans-serif;
+          font-size: 12px; font-weight: 700; letter-spacing: 0.4px; color: rgba(255,255,255,0.75);
+          cursor: pointer; transition: background .2s ease, color .2s ease, border-color .2s ease;
+        }
+        .boot-skip:hover { background: rgba(255,255,255,0.14); color: #fff; border-color: rgba(255,255,255,0.34); }
+        .boot-skip:active { transform: scale(0.96); }
+
         @media (prefers-reduced-motion: reduce) {
           * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
         }
       `}</style>
 
-      {booting && (
-        <div className={`boot-overlay ${bootFading ? "boot-fade" : ""}`}>
-          <div className="boot-scene">
-            <div className="boot-bottle">
-              <div className="boot-bottle-neck" />
-              <div className="boot-bottle-body" />
+      {booting &&
+        // portaled straight to <body>, outside .inv-root's overflow:hidden — an ancestor
+        // with overflow:hidden clips position:fixed descendants in Safari, which would
+        // otherwise cut the corner-anchored skip button off near the screen edge
+        createPortal(
+          <div className={`boot-overlay ${bootFading ? "boot-fade" : ""}`}>
+            <div className="boot-scene">
+              <div className="boot-bottle">
+                <div className="boot-bottle-neck" />
+                <div className="boot-bottle-body" />
+              </div>
+              <div className="boot-stream" />
+              <div className="boot-glass">
+                <div className="boot-glass-fill" />
+              </div>
             </div>
-            <div className="boot-stream" />
-            <div className="boot-glass">
-              <div className="boot-glass-fill" />
-            </div>
-          </div>
-          <div className="boot-label">Pouring up the baijiu…</div>
-        </div>
-      )}
+            <div className="boot-label">Pouring up the baijiu…</div>
+            <button type="button" className="boot-skip" onClick={skipBoot}>
+              Skip
+            </button>
+          </div>,
+          document.body
+        )}
 
       <div className="party-bg">
         <span style={{ width: 440, height: 440, top: "4%", left: "6%", backgroundColor: "var(--glow-a)" }} />
@@ -1061,9 +1155,22 @@ export default function BirthdayInvite() {
 
             {/* above the RSVP form on purpose — it explains what Day Hang / Dinner /
                 Night Outing are, which guests need before ticking the attending boxes */}
-            <button className="pill-btn ghost-btn" onClick={() => setShowItinerary(true)}>
-              <Calendar size={16} /> See Itinerary
-            </button>
+            <div style={{ display: "flex", gap: 10, width: "100%" }}>
+              <button
+                className="pill-btn ghost-btn"
+                style={{ flex: 1, padding: "12px 10px", fontSize: 13, justifyContent: "center", whiteSpace: "nowrap" }}
+                onClick={() => setShowItinerary(true)}
+              >
+                <Calendar size={15} /> Itinerary
+              </button>
+              <button
+                className="pill-btn ghost-btn"
+                style={{ flex: 1, padding: "12px 10px", fontSize: 13, justifyContent: "center", whiteSpace: "nowrap" }}
+                onClick={downloadInviteIcs}
+              >
+                <CalendarPlus size={15} /> Add to Calendar
+              </button>
+            </div>
 
             <div className="glass-panel" style={{ padding: "30px 26px", width: "100%", marginTop: 24 }}>
               <div className="serif" style={{ fontSize: 21, marginBottom: 4, fontWeight: 600 }}>
@@ -1217,15 +1324,15 @@ export default function BirthdayInvite() {
                     style={{
                       fontSize: 12,
                       fontWeight: 800,
-                      color: "#4ADE80",
-                      background: "rgba(74,222,128,0.14)",
-                      border: "1px solid rgba(74,222,128,0.4)",
+                      color: activeTabInfo.color,
+                      background: `${activeTabInfo.color}24`,
+                      border: `1px solid ${activeTabInfo.color}66`,
                       padding: "4px 10px",
                       borderRadius: 999,
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {headcount} confirmed
+                    {guestTabCounts[guestTab]} {activeTabInfo.key === "going" ? "confirmed" : activeTabInfo.label.toLowerCase()}
                   </span>
                 )}
               </div>
@@ -1239,35 +1346,34 @@ export default function BirthdayInvite() {
                   Nobody's RSVP'd yet — be the first.
                 </div>
               ) : (
-                <div style={{ display: "grid", gap: 22 }}>
-                  {going.length > 0 && (
+                <>
+                  <div className="guest-tabs">
+                    {GUEST_TABS.map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        className={`guest-tab ${guestTab === tab.key ? "guest-tab-active" : ""}`}
+                        style={guestTab === tab.key ? { borderColor: `${tab.color}66`, background: `${tab.color}1c`, color: "#fff" } : undefined}
+                        onClick={() => setGuestTab(tab.key)}
+                      >
+                        <span className="guest-tab-dot" style={{ background: tab.color }} />
+                        {tab.label}
+                        <span className="guest-tab-count">{guestTabCounts[tab.key]}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {activeGuestGroup.length > 0 ? (
                     <GuestGroup
-                      title="Going"
-                      items={going}
-                      dotColor="#4ADE80"
+                      items={activeGuestGroup}
+                      dotColor={activeTabInfo.color}
                       onSelect={setSelectedGuest}
                       onLongPress={handleLongPressGuest}
                     />
+                  ) : (
+                    <div style={{ opacity: 0.7, fontSize: 13.5, padding: "6px 2px" }}>Nobody here yet.</div>
                   )}
-                  {maybe.length > 0 && (
-                    <GuestGroup
-                      title="Maybe"
-                      items={maybe}
-                      dotColor="#FBBF24"
-                      onSelect={setSelectedGuest}
-                      onLongPress={handleLongPressGuest}
-                    />
-                  )}
-                  {declined.length > 0 && (
-                    <GuestGroup
-                      title="Can't make it"
-                      items={declined}
-                      dotColor="#F87171"
-                      onSelect={setSelectedGuest}
-                      onLongPress={handleLongPressGuest}
-                    />
-                  )}
-                </div>
+                </>
               )}
             </div>
           </div>
@@ -1365,17 +1471,12 @@ function FauxQR() {
   );
 }
 
-function GuestGroup({ title, items, dotColor, onSelect, onLongPress }) {
+function GuestGroup({ items, dotColor, onSelect, onLongPress }) {
   return (
-    <div>
-      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 10, fontWeight: 800, opacity: 0.9 }}>
-        {title}
-      </div>
-      <div style={{ display: "grid", gap: 6 }}>
-        {items.map((g) => (
-          <GuestRow key={g.id} guest={g} dotColor={dotColor} onSelect={onSelect} onLongPress={onLongPress} />
-        ))}
-      </div>
+    <div style={{ display: "grid", gap: 6 }}>
+      {items.map((g) => (
+        <GuestRow key={g.id} guest={g} dotColor={dotColor} onSelect={onSelect} onLongPress={onLongPress} />
+      ))}
     </div>
   );
 }
