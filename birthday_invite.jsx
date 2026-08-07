@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2 } from "lucide-react";
+import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock } from "lucide-react";
 import {
   fetchGuests,
   addGuest,
@@ -76,6 +76,16 @@ function getAdminCode(promptMessage) {
     // ignore — worst case it just prompts again next time
   }
   return entered;
+}
+
+// true once a code has been entered this session — good enough to grant early album access
+// without prompting again, since a wrong code gets forgotten the moment any admin write 401s
+function hasCachedAdminCode() {
+  try {
+    return !!sessionStorage.getItem(ADMIN_CODE_KEY);
+  } catch (e) {
+    return false;
+  }
 }
 
 function forgetAdminCode() {
@@ -214,6 +224,7 @@ export default function BirthdayInvite() {
   const [adminGuest, setAdminGuest] = useState(null);
   const [adminCode, setAdminCode] = useState("");
   const [showAlbum, setShowAlbum] = useState(false);
+  const [showAlbumLocked, setShowAlbumLocked] = useState(false);
   const [photos, setPhotos] = useState([]);
   const [loadingPhotos, setLoadingPhotos] = useState(true);
   const secretTaps = useRef({ count: 0, timer: null });
@@ -455,6 +466,22 @@ export default function BirthdayInvite() {
       if (e instanceof WrongCodeError) forgetAdminCode();
       throw e;
     }
+  }
+
+  function handleAlbumClick() {
+    if (albumUnlocked || hasCachedAdminCode()) {
+      setShowAlbum(true);
+    } else {
+      setShowAlbumLocked(true);
+    }
+  }
+
+  function handleAlbumUnlockWithCode() {
+    const code = getAdminCode("Enter the host code for early access:");
+    if (!code) return;
+    setAdminCode(code);
+    setShowAlbumLocked(false);
+    setShowAlbum(true);
   }
 
   async function handlePhotoUpload(file) {
@@ -1249,15 +1276,13 @@ export default function BirthdayInvite() {
               </button>
             </div>
 
-            {albumUnlocked && (
-              <button
-                className="pill-btn ghost-btn"
-                style={{ width: "100%", marginTop: 10, padding: "12px 10px", fontSize: 13, justifyContent: "center" }}
-                onClick={() => setShowAlbum(true)}
-              >
-                <Images size={15} /> Photo Album
-              </button>
-            )}
+            <button
+              className="pill-btn ghost-btn"
+              style={{ width: "100%", marginTop: 10, padding: "12px 10px", fontSize: 13, justifyContent: "center" }}
+              onClick={handleAlbumClick}
+            >
+              {albumUnlocked || hasCachedAdminCode() ? <Images size={15} /> : <Lock size={13} />} Photo Album
+            </button>
 
             <div className="glass-panel" style={{ padding: "30px 26px", width: "100%", marginTop: 24 }}>
               <div className="serif" style={{ fontSize: 21, marginBottom: 4, fontWeight: 600 }}>
@@ -1475,6 +1500,9 @@ export default function BirthdayInvite() {
             onLongPressEvent={handleLongPressEvent}
             onClose={() => setShowItinerary(false)}
           />
+        )}
+        {showAlbumLocked && (
+          <AlbumLockedModal onEnterCode={handleAlbumUnlockWithCode} onClose={() => setShowAlbumLocked(false)} />
         )}
         {showAlbum && (
           <PhotoAlbumModal
@@ -1905,8 +1933,42 @@ function ItineraryRow({ item, color, onLongPress }) {
   );
 }
 
+function AlbumLockedModal({ onEnterCode, onClose }) {
+  return (
+    <div className="guest-modal-backdrop" onClick={onClose}>
+      <div className="glass-panel guest-modal" style={{ maxWidth: 340, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+        <button className="guest-modal-close" onClick={onClose} aria-label="Close">
+          <X size={16} />
+        </button>
+        <div
+          style={{
+            width: 46, height: 46, borderRadius: "50%", margin: "4px auto 16px",
+            background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <Lock size={18} style={{ opacity: 0.8 }} />
+        </div>
+        <div className="serif" style={{ fontSize: 19, fontWeight: 600, marginBottom: 8 }}>
+          Photo album is locked
+        </div>
+        <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.6, marginBottom: 22 }}>
+          It unlocks for everyone on the day of the party. Got the host code? You can jump in early.
+        </div>
+        <button
+          className="pill-btn ghost-btn"
+          style={{ width: "100%", justifyContent: "center" }}
+          onClick={onEnterCode}
+        >
+          Enter Host Code
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PhotoAlbumModal({ photos, loading, myDeviceId, onUpload, onDelete, onClose }) {
-  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null); // { done, total } while a batch is in flight
   const [error, setError] = useState("");
   const fileInputRef = useRef(null);
 
@@ -1915,16 +1977,23 @@ function PhotoAlbumModal({ photos, loading, myDeviceId, onUpload, onDelete, onCl
     e.target.value = ""; // lets the same file be picked again later
     if (files.length === 0) return;
     setError("");
-    setUploading(true);
-    try {
-      for (const file of files) {
-        await onUpload(file);
+    setUploadProgress({ done: 0, total: files.length });
+
+    // uploaded one at a time (not Promise.all) so a big batch from the iOS multi-picker
+    // doesn't blast the API all at once, and a failed photo doesn't take the rest down with it
+    let failures = 0;
+    for (let i = 0; i < files.length; i++) {
+      try {
+        await onUpload(files[i]);
+      } catch {
+        failures++;
       }
-    } catch (err) {
-      setError(err.message || "Upload failed");
-    } finally {
-      setUploading(false);
+      setUploadProgress({ done: i + 1, total: files.length });
     }
+    if (failures > 0) {
+      setError(failures === files.length ? "Upload failed" : `${failures} of ${files.length} photos failed to upload`);
+    }
+    setUploadProgress(null);
   }
 
   return (
@@ -1984,12 +2053,13 @@ function PhotoAlbumModal({ photos, loading, myDeviceId, onUpload, onDelete, onCl
         <button
           className="pill-btn ghost-btn"
           style={{ marginTop: 22, width: "100%", justifyContent: "center" }}
-          disabled={uploading}
+          disabled={!!uploadProgress}
           onClick={() => fileInputRef.current?.click()}
         >
-          {uploading ? (
+          {uploadProgress ? (
             <>
-              <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> Uploading...
+              <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+              Uploading {uploadProgress.done}/{uploadProgress.total}...
             </>
           ) : (
             <>
