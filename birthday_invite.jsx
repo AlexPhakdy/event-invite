@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight } from "lucide-react";
+import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2 } from "lucide-react";
 import {
   fetchGuests,
   addGuest,
@@ -11,6 +11,10 @@ import {
   addItineraryItem,
   updateItineraryItem,
   deleteItineraryItem,
+  fetchPhotos,
+  uploadPhoto,
+  deletePhoto,
+  getDeviceId,
   WrongCodeError,
 } from "./api.js";
 
@@ -107,6 +111,30 @@ const EVENT_DATE = new Date(2026, 8, 19, 21, 0, 0);
 // city-level anchor rather than a single address.
 const CITY = "Charlotte, NC";
 
+// downscales + re-encodes to JPEG client-side before upload — phone camera photos are
+// easily 4-8MB, which is slow to upload and wasteful to store for a shared album
+function resizeImageToDataUrl(file, maxDim = 1600, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Couldn't read that image"));
+    };
+    img.src = objectUrl;
+  });
+}
+
 // UTC-based, no trailing "Z", stamped to local wall-clock digits — good enough for a
 // single all-day-ish birthday event without pulling in a timezone library.
 function icsStamp(date) {
@@ -185,6 +213,9 @@ export default function BirthdayInvite() {
   const [adminEvent, setAdminEvent] = useState(null);
   const [adminGuest, setAdminGuest] = useState(null);
   const [adminCode, setAdminCode] = useState("");
+  const [showAlbum, setShowAlbum] = useState(false);
+  const [photos, setPhotos] = useState([]);
+  const [loadingPhotos, setLoadingPhotos] = useState(true);
   const secretTaps = useRef({ count: 0, timer: null });
   const guestListRef = useRef(null);
 
@@ -200,6 +231,19 @@ export default function BirthdayInvite() {
       }
     })();
   }, [showItinerary]);
+
+  useEffect(() => {
+    if (!showAlbum) return;
+    (async () => {
+      try {
+        setPhotos(await fetchPhotos());
+      } catch (e) {
+        // no photos yet — empty album is fine
+      } finally {
+        setLoadingPhotos(false);
+      }
+    })();
+  }, [showAlbum]);
 
   useEffect(() => {
     if (submitted) {
@@ -413,6 +457,18 @@ export default function BirthdayInvite() {
     }
   }
 
+  async function handlePhotoUpload(file) {
+    const dataUrl = await resizeImageToDataUrl(file);
+    const saved = await uploadPhoto(dataUrl);
+    setPhotos((prev) => [saved, ...prev]);
+  }
+
+  async function handlePhotoDelete(photo) {
+    if (!window.confirm("Delete this photo?")) return;
+    await deletePhoto(photo.id);
+    setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+  }
+
   function toggleAttending(key) {
     setAttending((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   }
@@ -452,6 +508,11 @@ export default function BirthdayInvite() {
   const guestTabCounts = { going: going.length, maybe: maybe.length, declined: declined.length };
   const activeGuestGroup = guestTab === "going" ? going : guestTab === "maybe" ? maybe : declined;
   const activeTabInfo = GUEST_TABS.find((t) => t.key === guestTab);
+  // TEMPORARY: ?album=1 in the URL previews the photo album before the real unlock date so
+  // it can be checked on a real phone ahead of the event. Remove this line (and the ?album=1
+  // param) once the album has been tested — the date-based unlock below is the real gate.
+  const albumPreview = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("album");
+  const albumUnlocked = albumPreview || Date.now() >= EVENT_DATE.getTime();
 
   const showIntro = stage !== "claimed";
   const showMachine = stage === "idle" || stage === "printing";
@@ -588,6 +649,22 @@ export default function BirthdayInvite() {
         }
         .itinerary-title { font-size: 15.5px; font-weight: 700; }
         .itinerary-desc { font-size: 13px; opacity: 0.7; margin-top: 4px; line-height: 1.5; }
+
+        .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .photo-tile {
+          position: relative; width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden;
+          background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+        }
+        .photo-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .photo-delete {
+          position: absolute; top: 5px; right: 5px; width: 24px; height: 24px; border-radius: 50%;
+          background: rgba(10,8,14,0.72); border: 1px solid rgba(255,255,255,0.25); color: #FF9B9B;
+          display: flex; align-items: center; justify-content: center; cursor: pointer;
+          backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+          transition: background .2s ease, transform .15s ease;
+        }
+        .photo-delete:hover { background: rgba(255,90,90,0.3); }
+        .photo-delete:active { transform: scale(0.9); }
 
         .time-picker { display: flex; align-items: center; gap: 6px; }
         .time-picker-select {
@@ -1172,6 +1249,16 @@ export default function BirthdayInvite() {
               </button>
             </div>
 
+            {albumUnlocked && (
+              <button
+                className="pill-btn ghost-btn"
+                style={{ width: "100%", marginTop: 10, padding: "12px 10px", fontSize: 13, justifyContent: "center" }}
+                onClick={() => setShowAlbum(true)}
+              >
+                <Images size={15} /> Photo Album
+              </button>
+            )}
+
             <div className="glass-panel" style={{ padding: "30px 26px", width: "100%", marginTop: 24 }}>
               <div className="serif" style={{ fontSize: 21, marginBottom: 4, fontWeight: 600 }}>
                 RSVP below:
@@ -1387,6 +1474,16 @@ export default function BirthdayInvite() {
             onAddEvent={handleAddEventClick}
             onLongPressEvent={handleLongPressEvent}
             onClose={() => setShowItinerary(false)}
+          />
+        )}
+        {showAlbum && (
+          <PhotoAlbumModal
+            photos={photos}
+            loading={loadingPhotos}
+            myDeviceId={getDeviceId()}
+            onUpload={handlePhotoUpload}
+            onDelete={handlePhotoDelete}
+            onClose={() => setShowAlbum(false)}
           />
         )}
         {adminGuest && (
@@ -1804,6 +1901,103 @@ function ItineraryRow({ item, color, onLongPress }) {
       )}
       <div className="itinerary-title">{item.title}</div>
       {item.description && <div className="itinerary-desc">{item.description}</div>}
+    </div>
+  );
+}
+
+function PhotoAlbumModal({ photos, loading, myDeviceId, onUpload, onDelete, onClose }) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const fileInputRef = useRef(null);
+
+  async function handleFiles(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ""; // lets the same file be picked again later
+    if (files.length === 0) return;
+    setError("");
+    setUploading(true);
+    try {
+      for (const file of files) {
+        await onUpload(file);
+      }
+    } catch (err) {
+      setError(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="guest-modal-backdrop" onClick={onClose}>
+      <div className="glass-panel guest-modal itinerary-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="guest-modal-close" onClick={onClose} aria-label="Close">
+          <X size={16} />
+        </button>
+
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
+          <div style={{ fontSize: 30, marginBottom: 6 }}>📸</div>
+          <div className="serif" style={{ fontSize: 20, fontWeight: 600 }}>
+            Photo Album
+          </div>
+        </div>
+
+        {loading ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, opacity: 0.8, justifyContent: "center" }}>
+            <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> loading...
+          </div>
+        ) : photos.length === 0 ? (
+          <div style={{ fontSize: 14.5, color: "var(--muted)", lineHeight: 1.6, textAlign: "center" }}>
+            No photos yet — be the first to add one.
+          </div>
+        ) : (
+          <div className="photo-grid">
+            {photos.map((p) => (
+              <div key={p.id} className="photo-tile">
+                <img src={p.url} alt="" loading="lazy" />
+                {p.deviceId === myDeviceId && (
+                  <button
+                    type="button"
+                    className="photo-delete"
+                    onClick={() => onDelete(p)}
+                    aria-label="Delete photo"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && (
+          <div style={{ color: "#F87171", fontSize: 13, marginTop: 14, textAlign: "center" }}>{error}</div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: "none" }}
+          onChange={handleFiles}
+        />
+        <button
+          className="pill-btn ghost-btn"
+          style={{ marginTop: 22, width: "100%", justifyContent: "center" }}
+          disabled={uploading}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {uploading ? (
+            <>
+              <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> Uploading...
+            </>
+          ) : (
+            <>
+              <Upload size={16} /> Add Photos
+            </>
+          )}
+        </button>
+      </div>
     </div>
   );
 }

@@ -132,3 +132,61 @@ export async function deleteItineraryItem(id, code) {
   }
   await sendDelete(`/api/itinerary?id=${encodeURIComponent(id)}`, code);
 }
+
+// ---- photo album ----
+
+const PHOTOS_KEY = "photos";
+const DEVICE_ID_KEY = "device_id";
+
+// identifies "this browser" for delete permission — not a real account, just enough to
+// let someone remove their own upload without a whole auth system
+export function getDeviceId() {
+  let id = window.localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    window.localStorage.setItem(DEVICE_ID_KEY, id);
+  }
+  return id;
+}
+
+export async function fetchPhotos() {
+  if (DEV) return readLocal(PHOTOS_KEY);
+  const res = await fetch("/api/photos");
+  if (!res.ok) throw new Error("Failed to load photos");
+  return res.json();
+}
+
+export async function uploadPhoto(dataUrl) {
+  const deviceId = getDeviceId();
+  if (DEV) {
+    const saved = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, url: dataUrl, deviceId, ts: Date.now() };
+    writeLocal(PHOTOS_KEY, [...readLocal(PHOTOS_KEY), saved]);
+    return saved;
+  }
+  const res = await fetch("/api/photos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataUrl, deviceId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to upload photo");
+  }
+  return res.json();
+}
+
+export async function deletePhoto(id) {
+  const deviceId = getDeviceId();
+  if (DEV) {
+    writeLocal(PHOTOS_KEY, readLocal(PHOTOS_KEY).filter((p) => p.id !== id));
+    return;
+  }
+  const res = await fetch(`/api/photos?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { "x-device-id": deviceId },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to delete photo");
+  }
+}
