@@ -156,17 +156,24 @@ export async function fetchPhotos() {
   return res.json();
 }
 
-export async function uploadPhoto(dataUrl) {
+export async function uploadPhoto(dataUrl, title = "", caption = "") {
   const deviceId = getDeviceId();
   if (DEV) {
-    const saved = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, url: dataUrl, deviceId, ts: Date.now() };
+    const saved = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      url: dataUrl,
+      deviceId,
+      title,
+      caption,
+      ts: Date.now(),
+    };
     writeLocal(PHOTOS_KEY, [...readLocal(PHOTOS_KEY), saved]);
     return saved;
   }
   const res = await fetch("/api/photos", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dataUrl, deviceId }),
+    body: JSON.stringify({ dataUrl, deviceId, title, caption }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

@@ -562,9 +562,9 @@ export default function BirthdayInvite() {
     setShowAlbum(true);
   }
 
-  async function handlePhotoUpload(file) {
+  async function handlePhotoUpload(file, title = "", caption = "") {
     const dataUrl = await resizeImageToDataUrl(file);
-    const saved = await uploadPhoto(dataUrl);
+    const saved = await uploadPhoto(dataUrl, title, caption);
     setPhotos((prev) => [saved, ...prev]);
   }
 
@@ -833,7 +833,7 @@ export default function BirthdayInvite() {
         /* "+" upload button — pinned to the viewport so it's reachable no matter how far
            you've scrolled through the album */
         .album-fab {
-          position: fixed; z-index: 20; border: none; cursor: pointer;
+          position: fixed; z-index: 25; border: none; cursor: pointer;
           right: max(22px, env(safe-area-inset-right)); bottom: max(22px, env(safe-area-inset-bottom));
           width: 66px; height: 66px; border-radius: 50%;
           background: linear-gradient(135deg, var(--accent-a), var(--accent-b));
@@ -869,6 +869,15 @@ export default function BirthdayInvite() {
           padding: 10px 10px 10px 18px;
           box-shadow: 0 14px 30px -8px rgba(0,0,0,0.6);
         }
+
+        .photo-skip-all {
+          display: block; width: 100%; text-align: center; margin-top: 12px;
+          background: none; border: none; cursor: pointer;
+          font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12.5px; font-weight: 700;
+          color: rgba(255,255,255,0.5); transition: color .2s ease;
+        }
+        .photo-skip-all:hover { color: rgba(255,255,255,0.8); }
+        .photo-skip-all:disabled { cursor: default; }
 
         .time-picker { display: flex; align-items: center; gap: 6px; }
         .time-picker-select {
@@ -1155,10 +1164,17 @@ export default function BirthdayInvite() {
         .ticket-flip-outer { display: flex; flex-direction: column; align-items: center; perspective: 1600px; }
         .ticket-flip-card {
           position: relative; width: fit-content; cursor: pointer;
-          transform-style: preserve-3d; transition: transform .7s cubic-bezier(.4,.2,.2,1);
+          /* -webkit- prefix required — iOS Safari doesn't reliably honor the unprefixed
+             property alone, and without it the 3D space collapses flat, so both faces'
+             backface-visibility:hidden stops working and they bleed through each other */
+          -webkit-transform-style: preserve-3d; transform-style: preserve-3d;
+          transition: transform .7s cubic-bezier(.4,.2,.2,1);
         }
         .ticket-flip-card.is-flipped { transform: rotateY(180deg); }
-        .ticket-flip-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+        .ticket-flip-face {
+          backface-visibility: hidden; -webkit-backface-visibility: hidden;
+          -webkit-transform: translateZ(0);
+        }
         .ticket-flip-front { position: relative; }
         /* back face is absolutely positioned over the front's box — the front stays in
            normal flow so it's what actually gives the card its height */
@@ -2268,30 +2284,56 @@ function PhotoAlbumScreen({ photos, loading, myDeviceId, onUpload, onDelete, onB
   const [selected, setSelected] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
   const [albumView, setAlbumView] = useState("cards"); // "cards" | "grid"
+  // files picked but not yet uploaded — each one gets a quick optional caption step first
+  const [captionQueue, setCaptionQueue] = useState([]);
+  const [captionBatchTotal, setCaptionBatchTotal] = useState(0);
   const fileInputRef = useRef(null);
 
-  async function handleFiles(e) {
+  function handleFiles(e) {
     const files = Array.from(e.target.files || []);
     e.target.value = ""; // lets the same file be picked again later
     if (files.length === 0) return;
     setError("");
-    setUploadProgress({ done: 0, total: files.length });
+    setCaptionQueue(files);
+    setCaptionBatchTotal(files.length);
+  }
 
-    // uploaded one at a time (not Promise.all) so a big batch from the iOS multi-picker
-    // doesn't blast the API all at once, and a failed photo doesn't take the rest down with it
+  async function handleConfirmCaption(title, caption) {
+    const [file, ...rest] = captionQueue;
+    setUploadProgress({ done: 0, total: 1 });
+    try {
+      await onUpload(file, title, caption);
+    } catch {
+      setError("Upload failed");
+    } finally {
+      setUploadProgress(null);
+      setCaptionQueue(rest);
+      if (rest.length === 0) setCaptionBatchTotal(0);
+    }
+  }
+
+  function handleCancelQueue() {
+    setCaptionQueue([]);
+    setCaptionBatchTotal(0);
+  }
+
+  async function handleSkipAllCaptions() {
+    const remaining = captionQueue;
     let failures = 0;
-    for (let i = 0; i < files.length; i++) {
+    for (let i = 0; i < remaining.length; i++) {
+      setUploadProgress({ done: i, total: remaining.length });
       try {
-        await onUpload(files[i]);
+        await onUpload(remaining[i], "", "");
       } catch {
         failures++;
       }
-      setUploadProgress({ done: i + 1, total: files.length });
-    }
-    if (failures > 0) {
-      setError(failures === files.length ? "Upload failed" : `${failures} of ${files.length} photos failed to upload`);
     }
     setUploadProgress(null);
+    setCaptionQueue([]);
+    setCaptionBatchTotal(0);
+    if (failures > 0) {
+      setError(failures === remaining.length ? "Upload failed" : `${failures} of ${remaining.length} photos failed to upload`);
+    }
   }
 
   function toggleSelectMode() {
@@ -2390,6 +2432,12 @@ function PhotoAlbumScreen({ photos, loading, myDeviceId, onUpload, onDelete, onB
                   onClick={selectMode ? () => toggleSelected(p.id) : undefined}
                 >
                   <img src={p.url} alt="" loading="lazy" />
+                  {albumView === "cards" && (p.title || p.caption) && (
+                    <div className="ticket-photo-caption">
+                      {p.title || " "}
+                      {p.caption && <div className="ticket-photo-subcaption">"{p.caption}"</div>}
+                    </div>
+                  )}
                   {selectMode ? (
                     <span className="photo-select-mark">{selected.has(p.id) && <Check size={15} />}</span>
                   ) : (
@@ -2423,7 +2471,15 @@ function PhotoAlbumScreen({ photos, loading, myDeviceId, onUpload, onDelete, onB
           onChange={handleFiles}
         />
 
-        {selectMode ? (
+      </div>
+
+      {/* portaled to <body> — .page-content's own "fade-up" mount animation leaves a
+          `transform` on it via animation-fill-mode: forwards, and per spec any ancestor
+          with a transform becomes the containing block for position:fixed descendants.
+          Left inside .page-content, this button would pin itself to that shrink-wrapped
+          content box instead of the real viewport corner. */}
+      {createPortal(
+        selectMode ? (
           <div className="album-select-bar">
             <span style={{ fontSize: 12.5, color: "var(--muted)", whiteSpace: "nowrap" }}>{selected.size} selected</span>
             <button
@@ -2450,9 +2506,109 @@ function PhotoAlbumScreen({ photos, loading, myDeviceId, onUpload, onDelete, onB
               <Plus size={29} />
             )}
           </button>
+        ),
+        document.body
+      )}
+
+      {captionQueue.length > 0 && (
+        <PhotoCaptionModal
+          key={captionQueue[0].name + captionQueue[0].lastModified}
+          file={captionQueue[0]}
+          index={captionBatchTotal - captionQueue.length + 1}
+          total={captionBatchTotal}
+          uploading={!!uploadProgress}
+          uploadProgress={uploadProgress}
+          onConfirm={handleConfirmCaption}
+          onCancelAll={handleCancelQueue}
+          onSkipAll={handleSkipAllCaptions}
+        />
+      )}
+    </>
+  );
+}
+
+function PhotoCaptionModal({ file, index, total, uploading, uploadProgress, onConfirm, onCancelAll, onSkipAll }) {
+  const [title, setTitle] = useState("");
+  const [caption, setCaption] = useState("");
+  const [previewUrl, setPreviewUrl] = useState("");
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    setTitle("");
+    setCaption("");
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  return (
+    <div className="guest-modal-backdrop" onClick={uploading ? undefined : onCancelAll}>
+      <div className="glass-panel guest-modal" onClick={(e) => e.stopPropagation()}>
+        {!uploading && (
+          <button className="guest-modal-close" onClick={onCancelAll} aria-label="Cancel">
+            <X size={16} />
+          </button>
+        )}
+
+        <div style={{ textAlign: "center", marginBottom: 16 }}>
+          <div className="serif" style={{ fontSize: 18, fontWeight: 600 }}>
+            {total > 1 ? `Add caption (${index} of ${total})` : "Add a caption"}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>optional — leave blank to skip</div>
+        </div>
+
+        <div className="album-card" style={{ marginBottom: 16 }}>
+          {previewUrl && <img src={previewUrl} alt="" />}
+          {(title || caption) && (
+            <div className="ticket-photo-caption">
+              {title || " "}
+              {caption && <div className="ticket-photo-subcaption">"{caption}"</div>}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "grid", gap: 10, marginBottom: 18 }}>
+          <input
+            className="field"
+            placeholder="Title (optional)"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            maxLength={60}
+            disabled={uploading}
+          />
+          <input
+            className="field"
+            placeholder="Caption (optional)"
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            maxLength={100}
+            disabled={uploading}
+          />
+        </div>
+
+        <button
+          className="pill-btn pill-primary"
+          style={{ width: "100%", padding: "13px 0", fontSize: 14.5 }}
+          disabled={uploading}
+          onClick={() => onConfirm(title.trim(), caption.trim())}
+        >
+          {uploading ? (
+            <Loader2 size={17} style={{ animation: "spin 1s linear infinite" }} />
+          ) : title || caption ? (
+            "Add Photo"
+          ) : (
+            "Add Without Caption"
+          )}
+        </button>
+
+        {total > 1 && (
+          <button type="button" className="photo-skip-all" disabled={uploading} onClick={onSkipAll}>
+            {uploading
+              ? `Uploading ${uploadProgress?.done ?? 0}/${uploadProgress?.total ?? total}...`
+              : `Skip captions for all ${total - index + 1} remaining`}
+          </button>
         )}
       </div>
-    </>
+    </div>
   );
 }
 

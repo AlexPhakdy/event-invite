@@ -55,13 +55,16 @@ export default async function handler(req, res) {
         return;
       }
 
+      const title = String(body.title || "").trim().slice(0, 60);
+      const caption = String(body.caption || "").trim().slice(0, 100);
+
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const blob = await put(`photos/${id}.${ext}`, buffer, {
         access: "public",
         contentType: mime,
       });
 
-      const entry = { id, url: blob.url, blobPath: blob.pathname, deviceId, ts: Date.now() };
+      const entry = { id, url: blob.url, blobPath: blob.pathname, deviceId, title, caption, ts: Date.now() };
       await redis(["LPUSH", KEY, JSON.stringify(entry)]);
       res.status(200).json(entry);
       return;
