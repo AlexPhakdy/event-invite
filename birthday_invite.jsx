@@ -960,6 +960,7 @@ export default function BirthdayInvite() {
         /* ---- the ticket itself: dark metal stub, high-contrast type ---- */
         .ticket-metal {
           --width: min(58vw, 190px);
+          container-type: inline-size;
           position: relative;
           width: var(--width);
           border-radius: 16px;
@@ -976,7 +977,7 @@ export default function BirthdayInvite() {
           padding: 34px 28px 30px;
           border-radius: 22px;
         }
-        .ticket-metal-expanded .ticket-ages { margin-top: 22px; font-size: clamp(48px, 13vw, 72px); }
+        .ticket-metal-expanded .ticket-ages { margin-top: 22px; font-size: clamp(48px, 13cqw, 72px); }
         .ticket-metal-expanded .ticket-divider-line { margin: 26px 0; }
         .ticket-metal-expanded .ticket-details { font-size: 14px; }
         .ticket-metal-expanded .ticket-bottom { margin-top: 30px; }
@@ -999,7 +1000,12 @@ export default function BirthdayInvite() {
         .ticket-ages {
           position: relative; z-index: 1;
           margin-top: 14px; font-family: 'Fraunces', serif; font-weight: 600; line-height: 1;
-          font-size: clamp(38px, 11vw, 58px);
+          /* cqw (container-query width), not vw — the card's own width already caps out at
+             a fixed px value on wide screens (see --width above), but a plain vw font-size
+             keeps growing with the viewport past that point, so on desktop the text
+             outgrows the card that stopped growing. cqw ties the font to the card's actual
+             rendered width instead, so they always scale together. */
+          font-size: clamp(38px, 11cqw, 58px);
           display: flex; align-items: baseline; gap: 10px; color: #fff;
         }
         .ticket-ages span { font-size: 0.4em; color: var(--accent-a); transition: color 0.5s ease; }
