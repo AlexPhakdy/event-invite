@@ -109,7 +109,7 @@ const GUEST_TABS = [
 ];
 
 const EVENTS = [
-  { key: "day", label: "Day Hang", icon: "☀️" },
+  { key: "day", label: "Daytime", icon: "☀️" },
   { key: "dinner", label: "Dinner", icon: "🍽️" },
   { key: "night", label: "Night Outing", icon: "🌙" },
 ];
@@ -1517,7 +1517,7 @@ export default function BirthdayInvite() {
               <TicketCard going={headcount} docked expanded />
             </div>
 
-            {/* above the RSVP form on purpose — it explains what Day Hang / Dinner /
+            {/* above the RSVP form on purpose — it explains what Daytime / Dinner /
                 Night Outing are, which guests need before ticking the attending boxes */}
             <div style={{ display: "flex", gap: 10, width: "100%" }}>
               <button
