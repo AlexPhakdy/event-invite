@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft } from "lucide-react";
+import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft, SkipForward } from "lucide-react";
 import {
   fetchGuests,
   addGuest,
@@ -861,7 +861,8 @@ export default function BirthdayInvite() {
           50% { box-shadow: 0 14px 30px -8px rgba(0,0,0,0.6), 0 0 0 10px rgba(147,169,128,0); }
         }
         .album-select-bar {
-          align-self: center; margin-top: 22px;
+          position: fixed; z-index: 25; left: 50%; transform: translateX(-50%);
+          bottom: max(22px, env(safe-area-inset-bottom));
           display: flex; align-items: center; gap: 14px;
           background: rgba(20,17,27,0.92);
           backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
@@ -871,13 +872,16 @@ export default function BirthdayInvite() {
         }
 
         .photo-skip-all {
-          display: block; width: 100%; text-align: center; margin-top: 12px;
-          background: none; border: none; cursor: pointer;
+          display: flex; align-items: center; justify-content: center; gap: 6px;
+          width: 100%; margin-top: 12px; padding: 10px 0; cursor: pointer;
+          background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.16);
+          border-radius: 999px;
           font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12.5px; font-weight: 700;
-          color: rgba(255,255,255,0.5); transition: color .2s ease;
+          color: rgba(255,255,255,0.65); transition: background .2s ease, border-color .2s ease, color .2s ease;
         }
-        .photo-skip-all:hover { color: rgba(255,255,255,0.8); }
-        .photo-skip-all:disabled { cursor: default; }
+        .photo-skip-all:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.32); color: #fff; }
+        .photo-skip-all:active { transform: scale(0.98); }
+        .photo-skip-all:disabled { cursor: default; opacity: 0.6; transform: none; }
 
         .time-picker { display: flex; align-items: center; gap: 6px; }
         .time-picker-select {
@@ -891,19 +895,29 @@ export default function BirthdayInvite() {
         .time-picker-select:focus { border-color: var(--accent-a); }
         .time-picker-select option { background: #1B1420; color: #fff; }
         .time-picker-colon { font-weight: 800; opacity: 0.6; }
+        /* same sliding-pill mechanic as .status-group/.status-slider on the RSVP status
+           picker — a single animated pill translates behind whichever option is active,
+           instead of each button swapping its own background independently */
         .meridiem-toggle {
-          display: flex; margin-left: auto; padding: 3px; border-radius: 12px;
+          position: relative; display: flex; margin-left: auto; padding: 3px; border-radius: 12px;
           background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.14);
+          box-shadow: inset 0 1px 4px rgba(0,0,0,0.3);
+        }
+        .meridiem-slider {
+          position: absolute; top: 3px; bottom: 3px; left: 3px;
+          width: calc((100% - 6px) / 2); border-radius: 9px;
+          background: linear-gradient(135deg, var(--accent-a), var(--accent-b));
+          box-shadow: 0 4px 14px -4px rgba(0,0,0,0.55);
+          transition: transform 0.32s cubic-bezier(.22,1,.36,1);
+          z-index: 0;
         }
         .meridiem-toggle button {
+          position: relative; z-index: 1;
           border: none; background: transparent; color: rgba(255,255,255,0.65); font-weight: 700;
           font-size: 12.5px; padding: 9px 14px; border-radius: 9px; cursor: pointer;
-          font-family: 'Plus Jakarta Sans', sans-serif; transition: background .2s ease, color .2s ease;
+          font-family: 'Plus Jakarta Sans', sans-serif; transition: color .25s ease;
         }
-        .meridiem-toggle button.active {
-          background: linear-gradient(135deg, var(--accent-a), var(--accent-b)); color: #fff;
-          text-shadow: 0 1px 2px rgba(0,0,0,0.35);
-        }
+        .meridiem-toggle button.active { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
 
         .field {
           width: 100%; background: rgba(0,0,0,0.24); border: 1px solid rgba(255,255,255,0.16);
@@ -2478,37 +2492,39 @@ function PhotoAlbumScreen({ photos, loading, myDeviceId, onUpload, onDelete, onB
           with a transform becomes the containing block for position:fixed descendants.
           Left inside .page-content, this button would pin itself to that shrink-wrapped
           content box instead of the real viewport corner. */}
-      {createPortal(
-        selectMode ? (
-          <div className="album-select-bar">
-            <span style={{ fontSize: 12.5, color: "var(--muted)", whiteSpace: "nowrap" }}>{selected.size} selected</span>
+      {/* hidden while the caption modal is up — its own "Add Photo" button covers that job */}
+      {captionQueue.length === 0 &&
+        createPortal(
+          selectMode ? (
+            <div className="album-select-bar">
+              <span style={{ fontSize: 12.5, color: "var(--muted)", whiteSpace: "nowrap" }}>{selected.size} selected</span>
+              <button
+                className="pill-btn pill-primary"
+                style={{ padding: "10px 20px", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 7 }}
+                disabled={selected.size === 0 || saving}
+                onClick={handleSaveSelected}
+              >
+                {saving ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <Share2 size={15} />}
+                Save {selected.size > 0 ? selected.size : ""}
+              </button>
+            </div>
+          ) : (
             <button
-              className="pill-btn pill-primary"
-              style={{ padding: "10px 20px", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 7 }}
-              disabled={selected.size === 0 || saving}
-              onClick={handleSaveSelected}
+              type="button"
+              className="album-fab"
+              disabled={!!uploadProgress}
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Add photos"
             >
-              {saving ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <Share2 size={15} />}
-              Save {selected.size > 0 ? selected.size : ""}
+              {uploadProgress ? (
+                <Loader2 size={24} style={{ animation: "spin 1s linear infinite" }} />
+              ) : (
+                <Plus size={29} />
+              )}
             </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="album-fab"
-            disabled={!!uploadProgress}
-            onClick={() => fileInputRef.current?.click()}
-            aria-label="Add photos"
-          >
-            {uploadProgress ? (
-              <Loader2 size={24} style={{ animation: "spin 1s linear infinite" }} />
-            ) : (
-              <Plus size={29} />
-            )}
-          </button>
-        ),
-        document.body
-      )}
+          ),
+          document.body
+        )}
 
       {captionQueue.length > 0 && (
         <PhotoCaptionModal
@@ -2602,9 +2618,17 @@ function PhotoCaptionModal({ file, index, total, uploading, uploadProgress, onCo
 
         {total > 1 && (
           <button type="button" className="photo-skip-all" disabled={uploading} onClick={onSkipAll}>
-            {uploading
-              ? `Uploading ${uploadProgress?.done ?? 0}/${uploadProgress?.total ?? total}...`
-              : `Skip captions for all ${total - index + 1} remaining`}
+            {uploading ? (
+              <>
+                <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                Uploading {uploadProgress?.done ?? 0}/{uploadProgress?.total ?? total}...
+              </>
+            ) : (
+              <>
+                <SkipForward size={13} />
+                Skip captions for all {total - index + 1} remaining
+              </>
+            )}
           </button>
         )}
       </div>
@@ -2644,10 +2668,22 @@ function TimePicker({ value, onChange }) {
         ))}
       </select>
       <div className="meridiem-toggle">
-        <button type="button" className={meridiem === "AM" ? "active" : ""} onClick={() => set(hour12, minute, "AM")}>
+        <div
+          className="meridiem-slider"
+          style={{ transform: `translateX(${meridiem === "AM" ? 0 : 100}%)` }}
+        />
+        <button
+          type="button"
+          className={meridiem === "AM" ? "active" : ""}
+          onClick={() => set(hour12, minute, "AM")}
+        >
           AM
         </button>
-        <button type="button" className={meridiem === "PM" ? "active" : ""} onClick={() => set(hour12, minute, "PM")}>
+        <button
+          type="button"
+          className={meridiem === "PM" ? "active" : ""}
+          onClick={() => set(hour12, minute, "PM")}
+        >
           PM
         </button>
       </div>
