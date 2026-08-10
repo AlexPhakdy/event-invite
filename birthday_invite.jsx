@@ -721,13 +721,32 @@ export default function BirthdayInvite() {
         .danger-btn:hover { background: rgba(255,90,90,0.2); border-color: rgba(255,120,120,0.7); }
 
         .itinerary-modal {
-          max-height: 82vh; overflow-y: auto;
+          /* dvh, not vh — vh is based on the layout viewport as if Safari's toolbars were
+             already hidden, so on first open (toolbars still showing) an 82vh modal is
+             taller than what's actually visible and the bottom gets cut off until the user
+             scrolls and the toolbars collapse. dvh tracks the real visible height instead. */
+          max-height: min(70dvh, 560px); overflow-y: auto;
           scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.22) transparent;
         }
         .itinerary-modal::-webkit-scrollbar { width: 6px; }
         .itinerary-modal::-webkit-scrollbar-track { background: transparent; }
         .itinerary-modal::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 999px; }
         .itinerary-modal::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.36); }
+        /* an explicit (non-backdrop-filter) gradient, same one the ticket card uses — this
+           is what actually gets captured by "Save Itinerary". html2canvas can't render
+           backdrop-filter, so relying on the glass panel's translucency alone rendered as a
+           flat, empty-looking background in the exported image. */
+        .itinerary-capture {
+          background: linear-gradient(155deg, #221D2B 0%, #14111B 55%, #0A0810 100%);
+          border: 1px solid rgba(255,255,255,0.08); border-radius: 22px;
+          padding: 26px 20px 22px;
+        }
+        .itinerary-capture-footer {
+          margin-top: 28px; text-align: center;
+          font-family: 'Fraunces', serif; font-weight: 600; font-size: 13.5px;
+          color: rgba(255,255,255,0.55);
+        }
+        .itinerary-capture-footer span { color: var(--accent-b); margin: 0 3px; font-style: italic; }
         .itinerary-timeline {
           position: relative; display: grid; gap: 22px; padding-left: 28px;
         }
@@ -1053,6 +1072,8 @@ export default function BirthdayInvite() {
           animation: modal-fade .2s ease forwards;
         }
         @keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+        .guest-modal-backdrop.modal-closing { animation: modal-fade-out .18s ease forwards; }
+        @keyframes modal-fade-out { from { opacity: 1; } to { opacity: 0; } }
         .guest-modal {
           position: relative; width: min(360px, 100%); padding: 28px 24px;
           animation: modal-pop .22s cubic-bezier(.22,1,.36,1) forwards;
@@ -1060,6 +1081,11 @@ export default function BirthdayInvite() {
         @keyframes modal-pop {
           0% { opacity: 0; transform: scale(0.92) translateY(6px); }
           100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .guest-modal.modal-closing { animation: modal-pop-out .18s cubic-bezier(.4,0,.2,1) forwards; }
+        @keyframes modal-pop-out {
+          0% { opacity: 1; transform: scale(1) translateY(0); }
+          100% { opacity: 0; transform: scale(0.94) translateY(8px); }
         }
         .guest-modal-close {
           position: absolute; top: 14px; right: 14px; width: 28px; height: 28px; border-radius: 50%;
@@ -2163,6 +2189,13 @@ function AdminGuestModal({ guest, onSave, onDelete, onClose }) {
 function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose }) {
   const captureRef = useRef(null);
   const [saving, setSaving] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  // plays the reverse animation before actually unmounting, instead of just vanishing
+  function handleClose() {
+    setClosing(true);
+    setTimeout(onClose, 180);
+  }
 
   async function handleSaveImage() {
     if (!captureRef.current) return;
@@ -2173,7 +2206,7 @@ function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose 
       // backdrop-filter — html2canvas doesn't render backdrop-filter, so without this the
       // captured image would come out with a blank/transparent background
       const canvas = await html2canvas(captureRef.current, {
-        backgroundColor: "#14111B",
+        backgroundColor: "#0A0810",
         scale: 2,
       });
       canvas.toBlob((blob) => {
@@ -2187,13 +2220,16 @@ function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose 
   }
 
   return (
-    <div className="guest-modal-backdrop" onClick={onClose}>
-      <div className="glass-panel guest-modal itinerary-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="guest-modal-close" onClick={onClose} aria-label="Close">
+    <div className={`guest-modal-backdrop ${closing ? "modal-closing" : ""}`} onClick={handleClose}>
+      <div
+        className={`glass-panel guest-modal itinerary-modal ${closing ? "modal-closing" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button className="guest-modal-close" onClick={handleClose} aria-label="Close">
           <X size={16} />
         </button>
 
-        <div ref={captureRef} style={{ padding: 4 }}>
+        <div ref={captureRef} className="itinerary-capture">
           <div style={{ textAlign: "center", marginBottom: 22 }}>
             <div style={{ fontSize: 30, marginBottom: 6 }}>🗓️</div>
             <div className="serif" style={{ fontSize: 20, fontWeight: 600 }}>
@@ -2210,16 +2246,21 @@ function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose 
               Check back soon!
             </div>
           ) : (
-            <div className="itinerary-timeline">
-              {sortByTime(items).map((item, i) => (
-                <ItineraryRow
-                  key={item.id}
-                  item={item}
-                  color={TIMELINE_COLORS[i % TIMELINE_COLORS.length]}
-                  onLongPress={onLongPressEvent}
-                />
-              ))}
-            </div>
+            <>
+              <div className="itinerary-timeline">
+                {sortByTime(items).map((item, i) => (
+                  <ItineraryRow
+                    key={item.id}
+                    item={item}
+                    color={TIMELINE_COLORS[i % TIMELINE_COLORS.length]}
+                    onLongPress={onLongPressEvent}
+                  />
+                ))}
+              </div>
+              <div className="itinerary-capture-footer">
+                Alex <span>&amp;</span> Kylie · Sat, Sept 19, 2026
+              </div>
+            </>
           )}
         </div>
 
