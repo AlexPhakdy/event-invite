@@ -732,11 +732,11 @@ export default function BirthdayInvite() {
         .itinerary-modal::-webkit-scrollbar-track { background: transparent; }
         .itinerary-modal::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 999px; }
         .itinerary-modal::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.36); }
-        /* an explicit (non-backdrop-filter) gradient, same one the ticket card uses — this
-           is what actually gets captured by "Save Itinerary". html2canvas can't render
-           backdrop-filter, so relying on the glass panel's translucency alone rendered as a
-           flat, empty-looking background in the exported image. */
-        .itinerary-capture {
+        /* only added for the split-second html2canvas takes its snapshot (see
+           handleSaveImage) — an explicit gradient, same one the ticket card uses, since
+           html2canvas can't render the glass panel's backdrop-filter blur. Applying this
+           permanently would nest a second rounded card inside the already-rounded modal. */
+        .itinerary-capture-export {
           background: linear-gradient(155deg, #221D2B 0%, #14111B 55%, #0A0810 100%);
           border: 1px solid rgba(255,255,255,0.08); border-radius: 22px;
           padding: 26px 20px 22px;
@@ -2200,6 +2200,11 @@ function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose 
   async function handleSaveImage() {
     if (!captureRef.current) return;
     setSaving(true);
+    // the export-only card look (gradient background, border, rounded corners) is added
+    // right before the snapshot and removed right after — applying it permanently would
+    // nest a second rounded card inside the already-rounded modal, and its bottom corner
+    // would get clipped by the modal's own scroll area instead of rendering cleanly
+    captureRef.current.classList.add("itinerary-capture-export");
     try {
       const { default: html2canvas } = await import("html2canvas");
       // fixed solid background rather than relying on the glass panel's translucent
@@ -2215,6 +2220,7 @@ function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose 
     } catch {
       // best-effort feature — silently give up rather than blocking the modal
     } finally {
+      captureRef.current.classList.remove("itinerary-capture-export");
       setSaving(false);
     }
   }
@@ -2229,7 +2235,7 @@ function ItineraryModal({ items, loading, onAddEvent, onLongPressEvent, onClose 
           <X size={16} />
         </button>
 
-        <div ref={captureRef} className="itinerary-capture">
+        <div ref={captureRef}>
           <div style={{ textAlign: "center", marginBottom: 22 }}>
             <div style={{ fontSize: 30, marginBottom: 6 }}>🗓️</div>
             <div className="serif" style={{ fontSize: 20, fontWeight: 600 }}>
