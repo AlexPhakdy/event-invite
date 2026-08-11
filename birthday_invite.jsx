@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft, SkipForward, Camera } from "lucide-react";
+import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft, SkipForward, Camera, Volume2, VolumeX } from "lucide-react";
 import {
   fetchGuests,
   addGuest,
@@ -286,6 +286,8 @@ export default function BirthdayInvite() {
   const [stage, setStage] = useState("idle");
   const [flightStyle, setFlightStyle] = useState(null);
   const ticketRef = useRef(null);
+  const audioRef = useRef(null);
+  const [muted, setMuted] = useState(false);
   const [guests, setGuests] = useState([]);
   const [loadingGuests, setLoadingGuests] = useState(true);
   const [guestTab, setGuestTab] = useState("going");
@@ -375,6 +377,26 @@ export default function BirthdayInvite() {
     if (stage !== "idle") return;
     setStage("printing");
     setTimeout(() => setStage("falling"), 1500); // stutter-print, then it lets go
+  }
+
+  // starts once the ticket has actually landed — this whole chain traces back to the
+  // "Get Your Pass" click, so browsers still treat the eventual play() as user-initiated
+  // even though it's a few setTimeouts downstream of the tap itself
+  useEffect(() => {
+    if (stage === "landed") {
+      audioRef.current?.play().catch(() => {});
+    }
+  }, [stage]);
+
+  function toggleMuted() {
+    setMuted((prev) => {
+      const next = !prev;
+      if (audioRef.current) audioRef.current.muted = next;
+      // in case autoplay was blocked earlier, unmuting is itself a user gesture that can
+      // successfully kick off playback
+      if (!next) audioRef.current?.play().catch(() => {});
+      return next;
+    });
   }
 
   // once printing lets go, measure exactly where the ticket sits on screen and
@@ -1430,6 +1452,22 @@ export default function BirthdayInvite() {
         .boot-skip:hover { background: rgba(255,255,255,0.14); color: #fff; border-color: rgba(255,255,255,0.34); }
         .boot-skip:active { transform: scale(0.96); }
 
+        /* portaled to <body> — same reasoning as .album-fab: any ancestor with a transform
+           (like .page-content's mount animation) becomes the containing block for
+           position:fixed descendants, so this has to live outside that tree */
+        .mute-toggle {
+          position: fixed; z-index: 30; border: none; cursor: pointer;
+          top: max(18px, env(safe-area-inset-top)); right: max(18px, env(safe-area-inset-right));
+          width: 40px; height: 40px; border-radius: 50%;
+          background: rgba(20,17,27,0.6); border: 1px solid rgba(255,255,255,0.18);
+          backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+          color: rgba(255,255,255,0.8); display: flex; align-items: center; justify-content: center;
+          box-shadow: 0 8px 20px -8px rgba(0,0,0,0.5);
+          transition: background .2s ease, border-color .2s ease, transform .15s ease;
+        }
+        .mute-toggle:hover { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.34); color: #fff; }
+        .mute-toggle:active { transform: scale(0.9); }
+
         @media (prefers-reduced-motion: reduce) {
           * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
         }
@@ -1456,6 +1494,21 @@ export default function BirthdayInvite() {
               Skip
             </button>
           </div>,
+          document.body
+        )}
+
+      <audio ref={audioRef} src="/party-track.mp3" loop preload="none" />
+
+      {!showMachine &&
+        createPortal(
+          <button
+            type="button"
+            className="mute-toggle"
+            onClick={toggleMuted}
+            aria-label={muted ? "Unmute music" : "Mute music"}
+          >
+            {muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
+          </button>,
           document.body
         )}
 
