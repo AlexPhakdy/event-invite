@@ -1498,8 +1498,16 @@ export default function BirthdayInvite() {
           animation: now-playing-in-out 5s cubic-bezier(.22,1,.36,1) forwards;
         }
         .now-playing-toast svg { flex-shrink: 0; color: var(--accent-b); }
-        .now-playing-toast span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .now-playing-toast strong { font-weight: 700; color: #fff; }
+        .now-playing-label { flex-shrink: 0; white-space: nowrap; }
+        .now-playing-viewport { overflow: hidden; white-space: nowrap; min-width: 0; }
+        .now-playing-viewport strong { display: inline-block; font-weight: 700; color: #fff; white-space: nowrap; }
+        /* delay lets the fade-in (first ~8% of the 5s toast) finish before it starts
+           moving, and it finishes scrolling with time to spare before the fade-out begins */
+        .now-playing-scroll { animation: now-playing-scroll-text 3.6s ease-in-out 0.5s 1 both; }
+        @keyframes now-playing-scroll-text {
+          0%, 12% { transform: translateX(0); }
+          85%, 100% { transform: translateX(calc(-1 * var(--scroll-distance))); }
+        }
         @keyframes now-playing-in-out {
           0% { opacity: 0; transform: translate(-50%, -12px); }
           8%, 88% { opacity: 1; transform: translate(-50%, 0); }
@@ -1550,16 +1558,7 @@ export default function BirthdayInvite() {
           document.body
         )}
 
-      {nowPlaying &&
-        createPortal(
-          <div className="now-playing-toast">
-            <Music2 size={15} />
-            <span>
-              Now Playing: <strong>{NOW_PLAYING_TRACK}</strong>
-            </span>
-          </div>,
-          document.body
-        )}
+      {nowPlaying && createPortal(<NowPlayingToast track={NOW_PLAYING_TRACK} />, document.body)}
 
       <div className="party-bg">
         <span style={{ width: 440, height: 440, top: "4%", left: "6%", backgroundColor: "var(--glow-a)" }} />
@@ -2008,6 +2007,39 @@ function TicketCard({ going = 0, docked = false, expanded = false }) {
       <button type="button" className="ticket-flip-hint" onClick={() => setFlipped((f) => !f)}>
         <RotateCw size={12} /> Tap to flip
       </button>
+    </div>
+  );
+}
+
+// scrolls the track name just far enough to reveal whatever's cut off, timed to finish
+// before the toast itself fades out — but only if it's actually too long to fit, so a
+// short track name just sits still instead of scrolling nowhere
+function NowPlayingToast({ track }) {
+  const viewportRef = useRef(null);
+  const textRef = useRef(null);
+  const [distance, setDistance] = useState(0);
+
+  useEffect(() => {
+    const viewportEl = viewportRef.current;
+    const textEl = textRef.current;
+    if (!viewportEl || !textEl) return;
+    const overflow = textEl.scrollWidth - viewportEl.clientWidth;
+    setDistance(overflow > 0 ? overflow : 0);
+  }, [track]);
+
+  return (
+    <div className="now-playing-toast">
+      <Music2 size={15} />
+      <span className="now-playing-label">Now Playing:</span>
+      <div className="now-playing-viewport" ref={viewportRef}>
+        <strong
+          ref={textRef}
+          className={distance > 0 ? "now-playing-scroll" : ""}
+          style={distance > 0 ? { "--scroll-distance": `${distance}px` } : undefined}
+        >
+          {track}
+        </strong>
+      </div>
     </div>
   );
 }
