@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e \"const m = require\\('lucide-react'\\); console.log\\(typeof m.Volume2, typeof m.VolumeX\\)\")"
+      "Bash(node -e \"const m = require\\('lucide-react'\\); console.log\\(typeof m.Volume2, typeof m.VolumeX\\)\")",
+      "Bash(node -e \"const m = require\\('lucide-react'\\); console.log\\(typeof m.Music2\\)\")"
     ]
   }
 }

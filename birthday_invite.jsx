@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft, SkipForward, Camera, Volume2, VolumeX } from "lucide-react";
+import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft, SkipForward, Camera, Volume2, VolumeX, Music2 } from "lucide-react";
 import {
   fetchGuests,
   addGuest,
@@ -123,6 +123,8 @@ const EVENT_DATE = new Date(2026, 8, 19, 21, 0, 0);
 // Per-stop venues live in the itinerary (added closer to the date), so this is just the
 // city-level anchor rather than a single address.
 const CITY = "Charlotte, NC";
+
+const NOW_PLAYING_TRACK = "The Marias – No One Noticed (Extended English)";
 
 function crc32(bytes) {
   let crc = ~0;
@@ -288,6 +290,7 @@ export default function BirthdayInvite() {
   const ticketRef = useRef(null);
   const audioRef = useRef(null);
   const [muted, setMuted] = useState(false);
+  const [nowPlaying, setNowPlaying] = useState(false);
   const [guests, setGuests] = useState([]);
   const [loadingGuests, setLoadingGuests] = useState(true);
   const [guestTab, setGuestTab] = useState("going");
@@ -384,9 +387,17 @@ export default function BirthdayInvite() {
   // even though it's a few setTimeouts downstream of the tap itself
   useEffect(() => {
     if (stage === "landed") {
-      audioRef.current?.play().catch(() => {});
+      audioRef.current
+        ?.play()
+        .then(showNowPlayingToast)
+        .catch(() => {});
     }
   }, [stage]);
+
+  function showNowPlayingToast() {
+    setNowPlaying(true);
+    setTimeout(() => setNowPlaying(false), 5000);
+  }
 
   function toggleMuted() {
     setMuted((prev) => {
@@ -394,7 +405,7 @@ export default function BirthdayInvite() {
       if (audioRef.current) audioRef.current.muted = next;
       // in case autoplay was blocked earlier, unmuting is itself a user gesture that can
       // successfully kick off playback
-      if (!next) audioRef.current?.play().catch(() => {});
+      if (!next) audioRef.current?.play().then(showNowPlayingToast).catch(() => {});
       return next;
     });
   }
@@ -1463,10 +1474,37 @@ export default function BirthdayInvite() {
           backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
           color: rgba(255,255,255,0.8); display: flex; align-items: center; justify-content: center;
           box-shadow: 0 8px 20px -8px rgba(0,0,0,0.5);
-          transition: background .2s ease, border-color .2s ease, transform .15s ease;
+          transition: background .2s ease, border-color .2s ease, transform .15s ease, top .3s cubic-bezier(.22,1,.36,1);
         }
         .mute-toggle:hover { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.34); color: #fff; }
         .mute-toggle:active { transform: scale(0.9); }
+        /* the album's own topbar (Back/Select) occupies this same top-right corner —
+           slide the mute button down below it instead of letting the two overlap */
+        .mute-toggle-lowered { top: max(78px, calc(env(safe-area-inset-top) + 78px)); }
+
+        /* portaled to <body> for the same fixed-positioning reason as the mute button.
+           entrance + exit are baked into one 5s keyframe (matching the JS setTimeout that
+           unmounts it) rather than a separate closing-state, since a toast that just
+           vanishes doesn't need the same care as a modal someone is actively looking at */
+        .now-playing-toast {
+          position: fixed; z-index: 35; top: max(18px, env(safe-area-inset-top));
+          left: 50%; max-width: min(86vw, 380px);
+          display: flex; align-items: center; gap: 8px;
+          padding: 10px 16px; border-radius: 999px;
+          background: rgba(20,17,27,0.78); border: 1px solid rgba(255,255,255,0.18);
+          backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+          box-shadow: 0 10px 26px -10px rgba(0,0,0,0.6);
+          color: rgba(255,255,255,0.9); font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12.5px;
+          animation: now-playing-in-out 5s cubic-bezier(.22,1,.36,1) forwards;
+        }
+        .now-playing-toast svg { flex-shrink: 0; color: var(--accent-b); }
+        .now-playing-toast span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .now-playing-toast strong { font-weight: 700; color: #fff; }
+        @keyframes now-playing-in-out {
+          0% { opacity: 0; transform: translate(-50%, -12px); }
+          8%, 88% { opacity: 1; transform: translate(-50%, 0); }
+          100% { opacity: 0; transform: translate(-50%, -12px); }
+        }
 
         @media (prefers-reduced-motion: reduce) {
           * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
@@ -1503,12 +1541,23 @@ export default function BirthdayInvite() {
         createPortal(
           <button
             type="button"
-            className="mute-toggle"
+            className={`mute-toggle ${showAlbum ? "mute-toggle-lowered" : ""}`}
             onClick={toggleMuted}
             aria-label={muted ? "Unmute music" : "Mute music"}
           >
             {muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
           </button>,
+          document.body
+        )}
+
+      {nowPlaying &&
+        createPortal(
+          <div className="now-playing-toast">
+            <Music2 size={15} />
+            <span>
+              Now Playing: <strong>{NOW_PLAYING_TRACK}</strong>
+            </span>
+          </div>,
           document.body
         )}
 
