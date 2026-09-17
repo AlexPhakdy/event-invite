@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft, SkipForward, Camera, Volume2, VolumeX, Music2 } from "lucide-react";
+import { MapPin, Calendar, CalendarPlus, Check, Loader2, Ticket as TicketIcon, X, ChevronRight, Images, Upload, Trash2, Lock, RotateCw, CheckSquare, Share2, Plus, ArrowLeft, SkipForward, Camera, Volume2, VolumeX, Music2, GripVertical } from "lucide-react";
 import {
   fetchGuests,
   addGuest,
@@ -514,6 +514,28 @@ export default function BirthdayInvite() {
     if (!code) return;
     setAdminCode(code);
     setAdminGuest(guest);
+  }
+
+  // reordering is local-only (there's no server-side ordering to persist to) — it just
+  // lets the host arrange names within the current tab however's convenient to read
+  function handleReorderGuest(status, fromIndex, toIndex) {
+    setGuests((prev) => {
+      const indices = [];
+      prev.forEach((g, i) => {
+        if (g.status === status) indices.push(i);
+      });
+      if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= indices.length || toIndex >= indices.length) {
+        return prev;
+      }
+      const subset = indices.map((i) => prev[i]);
+      const [moved] = subset.splice(fromIndex, 1);
+      subset.splice(toIndex, 0, moved);
+      const next = [...prev];
+      indices.forEach((i, k) => {
+        next[i] = subset[k];
+      });
+      return next;
+    });
   }
 
   async function handleAdminSave(patch) {
@@ -1087,6 +1109,18 @@ export default function BirthdayInvite() {
           background: rgba(255,90,90,0.12) !important;
           transition: transform ${LONG_PRESS_MS}ms ease, background .2s ease, border-color .2s ease;
         }
+        .guest-row-dragging {
+          position: relative; z-index: 2; transition: none !important;
+          box-shadow: 0 10px 24px -6px rgba(0,0,0,0.55); border-color: rgba(255,255,255,0.4) !important;
+        }
+        .guest-row-handle {
+          flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+          width: 22px; height: 28px; margin: -4px 0; border: none; background: transparent;
+          color: rgba(255,255,255,0.4); cursor: grab; touch-action: none;
+          transition: color .2s ease;
+        }
+        .guest-row-handle:hover { color: rgba(255,255,255,0.75); }
+        .guest-row-handle:active { cursor: grabbing; }
         .guest-row-name { font-weight: 700; font-size: 13.5px; flex-shrink: 0; }
         .guest-row-events { font-size: 12px; flex-shrink: 0; opacity: 0.9; }
         .guest-row-chevron { flex-shrink: 0; margin-left: auto; opacity: 0.45; transition: opacity .2s ease, transform .2s ease; }
@@ -1878,6 +1912,7 @@ export default function BirthdayInvite() {
                       dotColor={activeTabInfo.color}
                       onSelect={setSelectedGuest}
                       onLongPress={handleLongPressGuest}
+                      onReorder={(from, to) => handleReorderGuest(guestTab, from, to)}
                     />
                   ) : (
                     <div style={{ opacity: 0.7, fontSize: 13.5, padding: "6px 2px" }}>Nobody here yet.</div>
@@ -2070,11 +2105,65 @@ function FauxQR() {
   );
 }
 
-function GuestGroup({ items, dotColor, onSelect, onLongPress }) {
+function GuestGroup({ items, dotColor, onSelect, onLongPress, onReorder }) {
+  // drag state lives here (not per-row) so a drag can span the whole list — dragInfo
+  // tracks the row-height-in-steps math, dragId/dragY just drive that one row's visual offset
+  const dragInfo = useRef(null); // { id, index, startClientY, rowHeight }
+  const [dragId, setDragId] = useState(null);
+  const [dragY, setDragY] = useState(0);
+
+  function handleHandlePointerDown(e, guest, index, rowEl) {
+    if (!rowEl) return;
+    const rect = rowEl.getBoundingClientRect();
+    dragInfo.current = { id: guest.id, index, startClientY: e.clientY, rowHeight: rect.height + 6 };
+    setDragId(guest.id);
+    setDragY(0);
+    try {
+      rowEl.setPointerCapture(e.pointerId);
+    } catch (err) {
+      // ignore — worst case the drag just ends a little less cleanly
+    }
+  }
+
+  function handlePointerMove(e) {
+    const info = dragInfo.current;
+    if (!info) return;
+    const dy = e.clientY - info.startClientY;
+    setDragY(dy);
+
+    const steps = Math.round(dy / info.rowHeight);
+    if (steps === 0) return;
+    const targetIndex = Math.min(Math.max(info.index + steps, 0), items.length - 1);
+    if (targetIndex !== info.index) {
+      onReorder(info.index, targetIndex);
+      dragInfo.current = { ...info, index: targetIndex, startClientY: info.startClientY + steps * info.rowHeight };
+    }
+  }
+
+  function endDrag() {
+    dragInfo.current = null;
+    setDragId(null);
+    setDragY(0);
+  }
+
   return (
-    <div style={{ display: "grid", gap: 6 }}>
-      {items.map((g) => (
-        <GuestRow key={g.id} guest={g} dotColor={dotColor} onSelect={onSelect} onLongPress={onLongPress} />
+    <div
+      style={{ display: "grid", gap: 6 }}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+    >
+      {items.map((g, i) => (
+        <GuestRow
+          key={g.id}
+          guest={g}
+          dotColor={dotColor}
+          onSelect={onSelect}
+          onLongPress={onLongPress}
+          dragging={dragId === g.id}
+          dragY={dragId === g.id ? dragY : 0}
+          onHandlePointerDown={(e, rowEl) => handleHandlePointerDown(e, g, i, rowEl)}
+        />
       ))}
     </div>
   );
@@ -2082,12 +2171,13 @@ function GuestGroup({ items, dotColor, onSelect, onLongPress }) {
 
 const LONG_PRESS_MS = 600;
 
-function GuestRow({ guest, dotColor, onSelect, onLongPress }) {
+function GuestRow({ guest, dotColor, onSelect, onLongPress, dragging, dragY, onHandlePointerDown }) {
   const timer = useRef(null);
   // set when a long-press fires so the click that follows the release doesn't also open
   // the detail modal
   const firedRef = useRef(false);
   const [pressing, setPressing] = useState(false);
+  const rowRef = useRef(null);
 
   function start() {
     firedRef.current = false;
@@ -2107,8 +2197,12 @@ function GuestRow({ guest, dotColor, onSelect, onLongPress }) {
   useEffect(() => () => clearTimeout(timer.current), []);
 
   return (
-    <button
-      className={`guest-row ${pressing ? "guest-row-pressing" : ""}`}
+    <div
+      ref={rowRef}
+      role="button"
+      tabIndex={0}
+      className={`guest-row ${pressing ? "guest-row-pressing" : ""} ${dragging ? "guest-row-dragging" : ""}`}
+      style={dragging ? { transform: `translateY(${dragY}px)` } : undefined}
       onClick={() => {
         if (firedRef.current) {
           firedRef.current = false;
@@ -2116,12 +2210,30 @@ function GuestRow({ guest, dotColor, onSelect, onLongPress }) {
         }
         onSelect(guest);
       }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(guest);
+        }
+      }}
       onPointerDown={start}
       onPointerUp={cancel}
       onPointerLeave={cancel}
       onPointerCancel={cancel}
       onContextMenu={(e) => e.preventDefault()}
     >
+      <button
+        type="button"
+        className="guest-row-handle"
+        aria-label={`Drag to reorder ${guest.name}`}
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onHandlePointerDown(e, rowRef.current);
+        }}
+      >
+        <GripVertical size={15} />
+      </button>
       <span className="dot" style={{ background: dotColor, flexShrink: 0 }} />
       <span className="guest-row-name">{guest.name}</span>
       {guest.attending?.length > 0 && (
@@ -2133,7 +2245,7 @@ function GuestRow({ guest, dotColor, onSelect, onLongPress }) {
       )}
       {guest.note && <span className="guest-row-note">&ldquo;{guest.note}&rdquo;</span>}
       <ChevronRight size={15} className="guest-row-chevron" />
-    </button>
+    </div>
   );
 }
 
